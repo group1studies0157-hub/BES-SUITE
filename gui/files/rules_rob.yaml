@@ -1,0 +1,334 @@
+# ============================================================
+# RULE SET 4: ROBs (Road Over Bridges)
+# Road/Highway passing over Railway — Grade Separators
+# ============================================================
+# Source: To be built from actual ROB GAD reviews.
+#   Initial rules from IR codes and ROB-specific practice.
+#   Add rules progressively as ROB GADs are reviewed.
+#
+# NEVER DELETE RULES. ADD PROGRESSIVELY ONLY.
+# Last updated: 2025-06-11 | GADs reviewed: 0
+# ============================================================
+
+rules:
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION A — GEOMETRIC / CLEARANCE CHECKS (ROB)
+  # ══════════════════════════════════════════════════════════
+
+  - id: ROB_G1
+    category: GEOMETRIC
+    severity: CRITICAL
+    title: "Vertical clearance below 6400mm from rail level to soffit"
+    description: >
+      Minimum vertical clearance from rail level to soffit of ROB
+      structure = 6400mm for BG electrified lines (OHE clearance +
+      construction tolerance). For non-electrified: as per site
+      conditions but not less than 5500mm.
+    reference: "IRS Bridge Rules 2014, Cl.5.7 / RDSO OHE clearance"
+    check_type: numeric_comparison
+    param_required: [rob_vertical_clearance_from_rl_mm]
+    condition: "rob_vertical_clearance_from_rl_mm >= 6400"
+    failure_message: >
+      Vertical clearance from RL to ROB soffit ({rob_vertical_clearance_from_rl_mm} mm)
+      < 6400mm minimum for electrified BG line. Raise ROB structure or
+      lower track (if feasible with gradient constraints).
+
+  - id: ROB_G2
+    category: GEOMETRIC
+    severity: CRITICAL
+    title: "Horizontal clearance from track centre to pier/wall face insufficient"
+    description: >
+      Horizontal distance from nearest rail/track centre to pier face
+      or abutment face must meet minimum dynamic envelope + safety margin.
+      Minimum: 3000mm from track centre to nearest obstruction for BG.
+    reference: "IRS Bridge Rules 2014 / Schedule of Dimensions"
+    check_type: numeric_comparison
+    param_required: [track_to_pier_clearance_mm]
+    condition: "track_to_pier_clearance_mm >= 3000"
+    failure_message: >
+      Track to pier/wall clearance ({track_to_pier_clearance_mm} mm) < 3000mm
+      minimum. Check against Schedule of Dimensions for the section.
+      Reposition pier or provide suitable protection.
+
+  - id: ROB_G3
+    category: GEOMETRIC
+    severity: MAJOR
+    title: "ROB road width below minimum for road class"
+    description: >
+      ROB carriageway width must meet IRC/road authority standards:
+      NH/SH: minimum 7.5m carriageway + footpaths.
+      District road: minimum 4.5m.
+    reference: "IRC 5 / IRC 6 / Road authority standards"
+    check_type: qualitative
+    param_required: [rob_road_width_adequate]
+    failure_message: >
+      ROB road width below minimum for applicable road class.
+      Verify against IRC standards and road authority requirements.
+
+  - id: ROB_G4
+    category: GEOMETRIC
+    severity: MAJOR
+    title: "Approach ramp gradient exceeds permissible for road class"
+    description: >
+      ROB approach ramp gradient must not exceed limits:
+      Urban areas: 1:20 (5%); Rural: 1:15 (6.67%).
+      Steeper gradients require IRC approval and crash barriers.
+    reference: "IRC SP-91 / IRC 83"
+    check_type: qualitative
+    param_required: [rob_ramp_gradient_acceptable]
+    failure_message: >
+      ROB approach ramp gradient exceeds permissible limit. Redesign
+      approach to meet IRC gradient requirements.
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION B — STRUCTURAL CHECKS (ROB)
+  # ══════════════════════════════════════════════════════════
+
+  - id: ROB_S1
+    category: STRUCTURAL
+    severity: CRITICAL
+    title: "Train loading standard not stated for pier/abutment design"
+    description: >
+      ROB piers and abutments within railway boundary must be designed
+      for the effect of train loading (vibration, dynamic augment, wind
+      from passing trains). Loading standard must be stated.
+    reference: "IRS Bridge Rules 2014 / IS 1893"
+    check_type: presence
+    param_required: [train_loading_considered_in_rob_design]
+    failure_message: >
+      Train loading effect on ROB piers/abutments not stated. Confirm
+      piers/abutments within railway boundary are designed for 25T/2008
+      loading effects per IRS Bridge Rules.
+
+  - id: ROB_S2
+    category: STRUCTURAL
+    severity: MAJOR
+    title: "Pier protection (crash barrier) against road vehicle impact not shown"
+    description: >
+      ROB piers within road carriageway or close to road edge must have
+      crash barriers or suitable impact protection per IRC standards.
+    reference: "IRC 6 / IRC SP-91"
+    check_type: presence
+    param_required: [rob_pier_protection_shown]
+    failure_message: >
+      Pier protection against vehicle impact not shown. Add crash barriers
+      or suitable protection for piers within or adjacent to road per IRC 6.
+
+  - id: ROB_S3
+    category: STRUCTURAL
+    severity: MAJOR
+    title: "Parapet height and specification on ROB not as per IRC"
+    description: >
+      ROB parapet height minimum 1100mm from road surface. Crash barrier
+      or solid parapet of adequate strength per IRC 5/IRC 6 required.
+    reference: "IRC 5 / IRC 6"
+    check_type: qualitative
+    param_required: [rob_parapet_height_adequate]
+    failure_message: >
+      ROB parapet height or specification does not meet IRC minimum.
+      Parapet: min 1100mm height, crash barrier or solid wall per IRC 6.
+
+  - id: ROB_S4
+    category: STRUCTURAL
+    severity: MAJOR
+    title: "Expansion joint details not shown on ROB deck"
+    description: >
+      Expansion joints at ends of ROB deck spans must be shown with
+      type, capacity, and drainage provisions.
+    reference: "IRC 83 Part I/II/III / IRS CBC 2014"
+    check_type: presence
+    param_required: [rob_expansion_joints_detailed]
+    failure_message: >
+      Expansion joint details not shown on ROB deck. Specify joint type,
+      movement capacity, and drainage below joint.
+
+  - id: ROB_S5
+    category: STRUCTURAL
+    severity: MAJOR
+    title: "Wearing coat and waterproofing of ROB deck not specified"
+    description: >
+      ROB deck wearing coat (CC M-25 or bituminous) and waterproofing
+      membrane below wearing coat must be specified. Drainage cross-fall
+      must be shown.
+    reference: "IRC 83 / IRS CBC 2014"
+    check_type: presence
+    param_required: [rob_wearing_coat_and_waterproofing_specified]
+    failure_message: >
+      Wearing coat and waterproofing of ROB deck not specified. Add:
+      wearing coat type/thickness, waterproofing membrane, cross-fall
+      for drainage.
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION C — RAILWAY PROTECTION (ROB)
+  # ══════════════════════════════════════════════════════════
+
+  - id: ROB_R1
+    category: RAILWAY_PROTECTION
+    severity: CRITICAL
+    title: "Derailment wall / guard rail not shown on ROB span over track"
+    description: >
+      All railway spans of ROB must have derailment guards (raised kerbs
+      min 200mm above rail level) or guard rails to prevent derailed
+      vehicles from falling off the structure. Mandatory per IRS Bridge Rules.
+    reference: "IRS Bridge Rules 2014, Cl.5.8"
+    check_type: presence
+    param_required: [rob_derailment_guard_shown]
+    failure_message: >
+      Derailment wall / guard rail not shown on railway span of ROB.
+      Provide raised kerb (min 200mm above RL) or guard rail along
+      entire length of span over track per IRS Bridge Rules 2014 Cl.5.8.
+
+  - id: ROB_R2
+    category: RAILWAY_PROTECTION
+    severity: CRITICAL
+    title: "Overhead clearance to OHE equipment not verified"
+    description: >
+      ROB soffit must maintain minimum clearance to highest point of OHE
+      equipment. Standard: min 300mm above OHE wire + construction
+      tolerance + rail/track maintenance tolerance.
+    reference: "RDSO OHE clearance standards / Railway Electrification norms"
+    check_type: qualitative
+    param_required: [rob_ohe_clearance_verified]
+    failure_message: >
+      Clearance between ROB soffit and OHE equipment not verified.
+      Coordinate with TRD/OHE design for wire height and confirm
+      minimum 300mm clearance above OHE highest point.
+
+  - id: ROB_R3
+    category: RAILWAY_PROTECTION
+    severity: MAJOR
+    title: "Track maintenance clearance envelope not verified on cross-section"
+    description: >
+      Cross-section must show that track maintenance equipment (tamper,
+      ballast regulator) can operate under ROB without fouling. Standard
+      working envelope to be checked.
+    reference: "IRPWM 2019 / Track maintenance machine dimensions"
+    check_type: qualitative
+    param_required: [rob_track_maintenance_envelope_clear]
+    failure_message: >
+      Track maintenance equipment working envelope not verified on
+      cross-section. Show tamper working clearance under ROB span.
+
+  - id: ROB_R4
+    category: RAILWAY_PROTECTION
+    severity: MAJOR
+    title: "ROB construction plan (shuttering, falsework) without affecting train operations not shown"
+    description: >
+      Method of construction of ROB spans over live railway track
+      must be detailed in Modus Operandi — particularly how falsework
+      and shuttering will be erected and struck without rail traffic
+      interruption. CRS approval required for any block/speed restriction.
+    reference: "IRPWM 2019 / CRS rules"
+    check_type: presence
+    param_required: [rob_construction_over_track_method_stated]
+    failure_message: >
+      Method of construction over live railway track not detailed. Add
+      to Modus Operandi: falsework/shuttering plan, speed restrictions
+      required, block requirements, and CRS sanction arrangement.
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION D — FOUNDATION (ROB)
+  # ══════════════════════════════════════════════════════════
+
+  - id: ROB_F1
+    category: FOUNDATION
+    severity: CRITICAL
+    title: "Foundation within railway boundary — prior approval required"
+    description: >
+      Piers/abutments within railway boundary require railway approval
+      for foundation works. Location and depth must be shown relative
+      to railway boundary and nearest track.
+    reference: "Railway Act / Land Management Rules"
+    check_type: qualitative
+    param_required: [rob_foundation_in_rly_boundary_approved]
+    failure_message: >
+      Foundation works within railway boundary require specific railway
+      approval. Show foundation location relative to boundary and track.
+      Obtain approval from DRM/Railway Land Management.
+
+  - id: ROB_F2
+    category: FOUNDATION
+    severity: CRITICAL
+    title: "Foundation pressure exceeds SBC"
+    description: >
+      Max foundation pressure must be < SBC at actual foundation level.
+    reference: "IRS Bridge Substructure Code 2013 / IS 6403"
+    check_type: qualitative
+    param_required: [foundation_pressure_within_sbc]
+    failure_message: >
+      Foundation pressure exceeds SBC. Increase foundation depth or area.
+
+  - id: ROB_F3
+    category: FOUNDATION
+    severity: MAJOR
+    title: "Pile foundation — load test and integrity test requirements not noted"
+    description: >
+      Pile load test (IS 2911 Part 4) and integrity test (100% piles)
+      requirements must be noted on drawing.
+    reference: "IS 2911 Part 4 / IR practice"
+    check_type: presence
+    param_required: [pile_load_test_noted]
+    failure_message: >
+      Add notes: pile load test per IS 2911 Part 4 and integrity test
+      for 100% of piles.
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION E — DRAWING COMPLETENESS (ROB)
+  # ══════════════════════════════════════════════════════════
+
+  - id: ROB_D1
+    category: DRAWING
+    severity: MAJOR
+    title: "Road authority design approval not referenced"
+    description: >
+      ROB design must be approved by the road authority (NHAI, PWD etc.)
+      in addition to railway approval. Reference must be on drawing.
+    reference: "Railway-Road crossing rules / NHAI/PWD norms"
+    check_type: presence
+    param_required: [road_authority_design_approval_referenced]
+    failure_message: >
+      Road authority (NHAI/PWD) design approval reference not on drawing.
+      Obtain and reference approval before tender.
+
+  - id: ROB_D2
+    category: DRAWING
+    severity: MAJOR
+    title: "Utility diversion plan not referenced"
+    description: >
+      Where utilities (power lines, water mains, cables) cross the ROB
+      corridor, diversion plan/NOC from utility owner must be referenced.
+    reference: "Standard practice for infrastructure projects"
+    check_type: qualitative
+    param_required: [utility_diversion_plan_referenced]
+    failure_message: >
+      Utility diversion plan not referenced on GAD. Identify all utilities
+      in the corridor, obtain NOCs/diversion plans, and reference on drawing.
+
+  - id: ROB_D3
+    category: DRAWING
+    severity: CRITICAL
+    title: "CRS sanction for ROB construction affecting railway operation not noted"
+    description: >
+      CRS sanction is required for any ROB construction that involves
+      working over or adjacent to the running track. Noted in Work
+      Execution Arrangements mandatory.
+    reference: "IRPWM 2019, Para 1302 / Railway Board circular"
+    check_type: presence
+    param_required: [crs_permission_note]
+    failure_message: >
+      CRS sanction note not included in Work Execution Arrangements.
+      Add: "CRS sanction shall be obtained before commencing work over/
+      adjacent to railway track per IRPWM 2019 Para 1302."
+
+  - id: ROB_D4
+    category: DRAWING
+    severity: NOTE
+    title: "Completion drawing obligation not stated"
+    description: >
+      Completion drawing submission per IRWM Para 911 must be noted.
+    reference: "IRWM Para 911"
+    check_type: presence
+    param_required: [completion_drawing_note]
+    failure_message: >
+      Add completion drawing obligation note per IRWM Para 911.

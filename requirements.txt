@@ -1,0 +1,26 @@
+# Bridge Engineering Suite v2.0 — Dependencies
+# Install: pip install -r requirements.txt
+
+# ── GUI ──────────────────────────────────────────────────────────────────────
+PyQt6>=6.5.0
+
+# ── Computer Vision (geometry detection) — local, free ───────────────────────
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+
+# ── CAD file output — open source ────────────────────────────────────────────
+ezdxf>=1.1.0
+
+# ── Image handling ────────────────────────────────────────────────────────────
+Pillow>=10.0.0
+
+# ── PDF support ───────────────────────────────────────────────────────────────
+PyMuPDF>=1.23.0
+
+# ── AI Vision — Claude (primary OCR + shape recognition) ─────────────────────
+anthropic>=0.25.0
+# Set ANTHROPIC_API_KEY env var, or enter key directly in the app Settings panel
+
+# ── Local OCR fallback (free, offline, optional) ──────────────────────────────
+pytesseract>=0.3.10
+# Requires Tesseract binary: https://github.com/UB-Mannheim/tesseract/wiki (Windows)

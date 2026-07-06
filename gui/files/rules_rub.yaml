@@ -1,0 +1,295 @@
+# ============================================================
+# RULE SET 3: RUBs (Road Under Bridges)
+# Underpasses / Subways — Road passing under Railway
+# ============================================================
+# Source: To be built from actual RUB GAD reviews.
+#   Initial rules derived from IR codes and general practice.
+#   Add rules progressively as RUB GADs are reviewed.
+#
+# NEVER DELETE RULES. ADD PROGRESSIVELY ONLY.
+# Last updated: 2025-06-11 | GADs reviewed: 0
+# ============================================================
+
+rules:
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION A — GEOMETRIC / CLEARANCE CHECKS (RUB)
+  # ══════════════════════════════════════════════════════════
+
+  - id: RUB_G1
+    category: GEOMETRIC
+    severity: CRITICAL
+    title: "Vertical clearance below minimum for road class"
+    description: >
+      Minimum vertical clearance for road vehicles:
+      National/State Highway: 5500mm
+      District/Village road: 4500mm (min 4000mm with special approval)
+      Measured from road formation to soffit of structure.
+    reference: "IRS Bridge Rules 2014, Cl.5.7 / IRC SP-91"
+    check_type: numeric_comparison
+    param_required: [rub_vertical_clearance_mm, road_class]
+    condition: "rub_vertical_clearance_mm >= 4500"
+    failure_message: >
+      Vertical clearance ({rub_vertical_clearance_mm} mm) below minimum.
+      NH/SH: 5500mm minimum; District road: 4500mm minimum.
+      Raise track formation or lower road profile.
+
+  - id: RUB_G2
+    category: GEOMETRIC
+    severity: CRITICAL
+    title: "Horizontal clearance (width) below minimum for road class"
+    description: >
+      Minimum horizontal clear width between walls/faces:
+      Single lane: 4500mm
+      Two lane: 7500mm
+      As per road authority requirements and IRC standards.
+    reference: "IRC SP-91 / IRS Bridge Rules 2014"
+    check_type: numeric_comparison
+    param_required: [rub_clear_width_mm]
+    condition: "rub_clear_width_mm >= 4500"
+    failure_message: >
+      RUB clear width ({rub_clear_width_mm} mm) below minimum.
+      Single lane: 4500mm; Two lane: 7500mm minimum.
+
+  - id: RUB_G3
+    category: GEOMETRIC
+    severity: MAJOR
+    title: "Approach road gradient exceeds maximum permissible"
+    description: >
+      Approach road gradient to RUB must not exceed 1:30 (3.33%) for
+      vehicles to negotiate. Steeper gradient requires specific approval.
+    reference: "IRC SP-91 / Road design standards"
+    check_type: qualitative
+    param_required: [rub_approach_gradient_acceptable]
+    failure_message: >
+      RUB approach road gradient exceeds 1:30 maximum. Redesign approach
+      road profile or extend length of approach to reduce gradient.
+
+  - id: RUB_G4
+    category: GEOMETRIC
+    severity: MAJOR
+    title: "Track centre distance not maintaining railway standard over RUB"
+    description: >
+      Track centre distance over RUB box must meet IRPWM minimum (5300mm)
+      or project-specific approved value. RUB width must accommodate the
+      required track centres with adequate wall thickness.
+    reference: "IRPWM 2019"
+    check_type: qualitative
+    param_required: [track_centres_over_rub_adequate]
+    failure_message: >
+      Track centre distance over RUB does not meet minimum. Verify RUB
+      structural width accommodates required track centres.
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION B — STRUCTURAL CHECKS (RUB)
+  # ══════════════════════════════════════════════════════════
+
+  - id: RUB_S1
+    category: STRUCTURAL
+    severity: CRITICAL
+    title: "RUB designed for correct train loading standard"
+    description: >
+      RUB structure must be designed for the applicable railway loading
+      (25T/2008 or as applicable) applied to the top slab, in addition
+      to road vehicle loading on approach ramps. Loading standard must
+      be explicitly stated.
+    reference: "IRS Bridge Rules 2014 / IRS CBC 2014"
+    check_type: presence
+    param_required: [train_loading_standard_stated]
+    failure_message: >
+      Train loading standard for RUB design not stated. Specify 25T/2008
+      or applicable loading standard for top slab design.
+
+  - id: RUB_S2
+    category: STRUCTURAL
+    severity: MAJOR
+    title: "Waterproofing of top slab not specified"
+    description: >
+      Top slab of RUB (below railway track) must have waterproofing
+      treatment — bituminous waterproofing (min 2 coats) + protective
+      layer. Without waterproofing, water seeps into the underpass
+      creating maintenance and safety hazard.
+    reference: "IRS CBC 2014 / IRBM 2024"
+    check_type: presence
+    param_required: [rub_top_slab_waterproofing_specified]
+    failure_message: >
+      Waterproofing of RUB top slab not specified. Add: bituminous
+      waterproofing (min 2 coats) on top slab before laying ballast
+      or sub-ballast. Specify drainage system for track bed.
+
+  - id: RUB_S3
+    category: STRUCTURAL
+    severity: MAJOR
+    title: "Drainage arrangement inside RUB not shown"
+    description: >
+      Internal drainage of the RUB (collection of seepage and rainfall)
+      must be shown with sump, pump, or gravity outlet arrangement.
+      Underpasses without drainage become flooded rendering them unusable.
+    reference: "IRC SP-91 / IRBM 2024"
+    check_type: presence
+    param_required: [rub_internal_drainage_shown]
+    failure_message: >
+      Internal drainage arrangement not shown in RUB. Show: drain channels,
+      sump dimensions (if pump-out required) or gravity outlet with
+      non-return valve. Indicate maintenance access.
+
+  - id: RUB_S4
+    category: STRUCTURAL
+    severity: MAJOR
+    title: "Retaining wall / wing wall design for railway surcharge not confirmed"
+    description: >
+      RUB wing walls and approach retaining walls are subject to railway
+      surcharge load in addition to earth pressure. Structural design
+      must account for this.
+    reference: "IRS Bridge Substructure Code 2013"
+    check_type: qualitative
+    param_required: [rub_walls_designed_for_railway_surcharge]
+    failure_message: >
+      RUB retaining/wing walls must be designed for railway surcharge
+      (equivalent strip load of 13.7 kN/m² for BG). Confirm in design
+      calculation reference.
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION C — PROTECTION / SAFETY (RUB)
+  # ══════════════════════════════════════════════════════════
+
+  - id: RUB_P1
+    category: PROTECTION
+    severity: MAJOR
+    title: "Height gauge / clearance indicator not shown"
+    description: >
+      Height gauge (clearance indicator board) must be shown at RUB
+      entry indicating maximum height of vehicles permitted.
+      This is a mandatory safety feature.
+    reference: "IRC SP-91 / Road safety norms"
+    check_type: presence
+    param_required: [rub_height_gauge_shown]
+    failure_message: >
+      Height gauge/clearance indicator not shown at RUB entry. Add height
+      gauge showing maximum permissible vehicle height at both approach ends.
+
+  - id: RUB_P2
+    category: PROTECTION
+    severity: MAJOR
+    title: "Crash barrier / kerb inside RUB not shown"
+    description: >
+      Crash barriers or kerbs inside RUB must be shown to protect the
+      structural walls from vehicle impact.
+    reference: "IRC SP-91"
+    check_type: presence
+    param_required: [rub_crash_barrier_shown]
+    failure_message: >
+      Crash barriers/kerbs inside RUB not shown. Provide kerb or
+      barrier to protect walls from vehicle impact per IRC SP-91.
+
+  - id: RUB_P3
+    category: PROTECTION
+    severity: MAJOR
+    title: "Lighting arrangement not mentioned for RUB"
+    description: >
+      Lighting arrangement inside the RUB must be provided and referenced.
+      Dark underpasses are a safety and security hazard.
+    reference: "IRC SP-91 / Road safety"
+    check_type: presence
+    param_required: [rub_lighting_mentioned]
+    failure_message: >
+      Lighting arrangement not mentioned for RUB. Add note specifying
+      lighting requirement (with reference to electrical drawing or IRC SP-91).
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION D — FOUNDATION (RUB)
+  # ══════════════════════════════════════════════════════════
+
+  - id: RUB_F1
+    category: FOUNDATION
+    severity: CRITICAL
+    title: "Foundation depth tentative — non-erodible strata note required"
+    description: >
+      Foundation depth shown is tentative. Must be placed on firm,
+      non-erodible strata. Engineer-in-Charge to verify at excavation.
+    reference: "IRS Bridge Substructure Code 2013"
+    check_type: presence
+    param_required: [non_erodible_strata_note_present]
+    failure_message: >
+      Add: "Foundation depth shown is tentative. Actual depth to be
+      decided by Engineer-in-Charge based on strata condition."
+
+  - id: RUB_F2
+    category: FOUNDATION
+    severity: CRITICAL
+    title: "Foundation pressure exceeds SBC"
+    description: >
+      Max foundation pressure must be < SBC at actual foundation level.
+    reference: "IRS Bridge Substructure Code 2013, Cl.4.4"
+    check_type: qualitative
+    param_required: [foundation_pressure_within_sbc]
+    failure_message: >
+      Foundation pressure exceeds SBC. Increase foundation area or depth.
+
+  - id: RUB_F3
+    category: FOUNDATION
+    severity: MAJOR
+    title: "SBC not stated at actual foundation level depth"
+    description: >
+      SBC value must correspond to actual foundation depth.
+    reference: "IRS Bridge Substructure Code 2013"
+    check_type: qualitative
+    param_required: [sbc_stated_at_foundation_level]
+    failure_message: >
+      State SBC at actual foundation level depth, not at standard test depth.
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION E — DRAWING COMPLETENESS (RUB)
+  # ══════════════════════════════════════════════════════════
+
+  - id: RUB_D1
+    category: DRAWING
+    severity: MAJOR
+    title: "Road authority NOC / approval not mentioned"
+    description: >
+      NOC from the road authority (NHAI, PWD, Panchayat as applicable)
+      must be obtained and referenced on GAD before tender.
+    reference: "IR practice for road crossing works"
+    check_type: presence
+    param_required: [road_authority_noc_referenced]
+    failure_message: >
+      Road authority NOC not referenced on GAD. Obtain NOC from applicable
+      road authority and add reference on drawing.
+
+  - id: RUB_D2
+    category: DRAWING
+    severity: MAJOR
+    title: "Existing road levels and profile not shown"
+    description: >
+      Existing road levels (RL at crown, RL at kerb) and road cross-fall
+      must be shown to allow assessment of RUB impact on road.
+    reference: "Drawing completeness"
+    check_type: presence
+    param_required: [existing_road_levels_shown]
+    failure_message: >
+      Existing road levels and cross-section profile not shown. Add
+      existing road crown and kerb levels on cross-section.
+
+  - id: RUB_D3
+    category: DRAWING
+    severity: MINOR
+    title: "Drawing number incomplete or signatures absent"
+    description: >
+      Drawing number, revision, and all signature blocks must be complete.
+    reference: "IR Drawing office practice"
+    check_type: presence
+    param_required: [drawing_number_complete]
+    failure_message: >
+      Complete drawing number and all signature blocks before issue.
+
+  - id: RUB_D4
+    category: DRAWING
+    severity: NOTE
+    title: "Completion drawing obligation not stated"
+    description: >
+      Completion drawing submission obligation per IRWM Para 911 must be noted.
+    reference: "IRWM Para 911"
+    check_type: presence
+    param_required: [completion_drawing_note]
+    failure_message: >
+      Add completion drawing obligation note per IRWM Para 911.

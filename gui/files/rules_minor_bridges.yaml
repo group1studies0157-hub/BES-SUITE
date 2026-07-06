@@ -1,0 +1,1804 @@
+# ============================================================
+# RULE SET 1: MINOR BRIDGES
+# RCC Box Culverts, STC, Arch Bridges — Span < 6m
+# ============================================================
+# Source: Blue annotation analysis from GADs:
+#   2KK, 6KK, 7KK, 19KK, 21KK, 23KK, 24KK, 24MB, 27KK
+#   Dornakal–Bhadrachalam Road Section Doubling, SCR/SEC Division
+#   Reviewed by SSE/Drawing & Design Branch
+#
+# FORMAT: Each rule has —
+#   id, category, severity, title, description, reference,
+#   check_type, param_required, failure_message
+#
+# SEVERITY: CRITICAL / MAJOR / MINOR / NOTE
+# NEVER DELETE RULES. ADD PROGRESSIVELY ONLY.
+# Last updated: 2025-06-11 | GADs reviewed: 10
+# ============================================================
+
+rules:
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION A — HYDRAULIC CHECKS (Minor Bridges)
+  # ══════════════════════════════════════════════════════════
+
+  - id: MB_H1
+    category: HYDRAULIC
+    severity: CRITICAL
+    title: "Proposed waterway area less than required"
+    description: >
+      Proposed waterway area must be >= Required waterway area.
+      For RCC box culverts compare area at standard FB condition
+      (FL - BL - 1.0m) and also at full bore/OHFL condition.
+    reference: "IRS Bridge Rules 2014, Cl.5.2"
+    check_type: numeric_comparison
+    param_required: [proposed_waterway_area_m2, required_waterway_area_m2]
+    condition: "proposed_waterway_area_m2 >= required_waterway_area_m2"
+    failure_message: >
+      Proposed waterway area ({proposed_waterway_area_m2} m²) < Required
+      ({required_waterway_area_m2} m²). Revise span/height of RCC box.
+
+  - id: MB_H2
+    category: HYDRAULIC
+    severity: CRITICAL
+    title: "Proposed linear waterway less than existing"
+    description: >
+      Proposed linear waterway must not be less than existing bridge
+      linear waterway. Any reduction needs hydraulic justification.
+    reference: "IRS Bridge Rules 2014, Cl.5.2"
+    check_type: numeric_comparison
+    param_required: [proposed_linear_waterway_m, existing_linear_waterway_m]
+    condition: "proposed_linear_waterway_m >= existing_linear_waterway_m"
+    failure_message: >
+      Proposed LW ({proposed_linear_waterway_m} m) < Existing LW
+      ({existing_linear_waterway_m} m). Hydraulic justification required.
+
+  - id: MB_H3
+    category: HYDRAULIC
+    severity: CRITICAL
+    title: "Free board less than 1.000 m (or existing FB if less)"
+    description: >
+      For RCC box culverts: Standard free board required = 1.000 m.
+      If existing FB is less than 1.000 m, retain the existing FB.
+      Per Cl.4.9.3 of IRS Substructure Code, for upstream side proposals,
+      existing bridge HFL/FB is to be retained.
+      Source: 23KK (FB req 0.765 m per existing), 24KK (FB req = FB prov = 0.941 m).
+    reference: "IRS Bridge Rules 2014, Cl.5.5 / IRS Substructure Code Cl.4.9.3"
+    check_type: numeric_comparison
+    param_required: [freeboard_provided_m, freeboard_required_m]
+    condition: "freeboard_provided_m >= freeboard_required_m"
+    failure_message: >
+      Freeboard provided ({freeboard_provided_m} m) < required ({freeboard_required_m} m).
+      For upstream side proposals, existing FB must be retained per
+      IRS Substructure Code Cl.4.9.3. Raise FL/RL accordingly.
+
+  - id: MB_H4
+    category: HYDRAULIC
+    severity: MAJOR
+    title: "BED LEVEL of proposed bridge lower than existing — junction leak risk"
+    description: >
+      When proposed RCC box is being built adjacent/abutting an existing
+      bridge, and the proposed bed level is LOWER than existing bed level,
+      the junction arrangement becomes eccentric and will cause leaks.
+      Bed level must be maintained same as existing. FL and RL to be raised
+      on the proposed bridge instead.
+      Source: 2KK blue annotation — "LOWERING BED LEVEL AND MAINTAINING SAME
+      CLEAR SPAN WILL EFFECT THE JUNCTION ARRANGEMENTS; WILL RESULT IN LEAKS.
+      MAINTAIN UNIFORM BED LEVEL AND RAISE FL,RL OF PROPOSED BRIDGES."
+    reference: "Construction practice / IRBM 2024"
+    check_type: qualitative
+    param_required: [proposed_bl_matches_existing_bl_at_junction]
+    failure_message: >
+      Proposed bed level is lower than existing bridge bed level at
+      junction. Lowering BL while maintaining same clear span causes
+      eccentric butt arrangement resulting in leaks. Maintain uniform
+      BL and raise FL/RL of proposed bridge instead.
+
+  - id: MB_H5
+    category: HYDRAULIC
+    severity: MAJOR
+    title: "Fluming arrangement not shown for box culvert on curved track"
+    description: >
+      Where the proposed bridge is on a curve or where the waterway
+      is at an angle to the track, fluming (guide bunds / approach training)
+      must be shown to ensure laminar flow into the box. Without fluming,
+      turbulent entry reduces effective waterway.
+      Source: 7KK annotation "show proposed fluming"; 24KK annotation
+      "FLUMING TO BE DONE TO ENSURE LAMINAR FLOW"; 515 annotation
+      "fluming arrangements" — third occurrence of this pattern, indicating
+      fluming is routinely omitted on initial submission and must become
+      a standard checklist item for ALL RCC box GADs regardless of curve
+      status, since 515 is on a curve (R 147) like the others.
+    reference: "IRBM 2024, Ch.VIII / IRS Bridge Rules Cl.5.12"
+    check_type: presence
+    param_required: [fluming_shown_for_angled_flow]
+    failure_message: >
+      Fluming arrangement not shown. Where flow is at angle to bridge axis
+      or on a curve, guide bunds/fluming must be shown on plan to ensure
+      laminar flow. Add fluming details on plan view. This is a routinely
+      missed item — check on every RCC box GAD with curved alignment.
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION B — SOIL / FOUNDATION CHECKS (Minor Bridges)
+  # ══════════════════════════════════════════════════════════
+
+  - id: MB_F1
+    category: FOUNDATION
+    severity: CRITICAL
+    title: "SBC stated at wrong depth — not at actual foundation level"
+    description: >
+      SBC must be stated at the ACTUAL FOUNDATION LEVEL depth, not at
+      a standard depth (0.5m, 1.0m, 1.5m, 2.0m) that differs from foundation level.
+      Where SBC is stated at a depth shallower than actual foundation,
+      the value is non-conservative and incorrect.
+
+      MULTI-VALUE PATTERN (Br.515): A single drawing may show THREE
+      different SBC values at THREE different depths in different places
+      (general notes, trial pit, certificate) — none corresponding to the
+      actual BOF (Bottom of Foundation) level. Max foundation pressure is
+      then compared against none of these consistently. ALL SBC references
+      on the drawing must be reconciled to a SINGLE value stated at the
+      actual BOF level, and max foundation pressure compared against that
+      single value.
+      Source: 6KK — "mention SBC at foundation level of RCC box";
+      23KK — "SBC to be mentioned at foundation level of RCC box (0.65m)";
+      27KK — "foundation is at 1.35m whereas SBC mentioned is at 1.50m level";
+      24KK — "SBC value is at 1.2m depth below BL but bottom of foundation
+      is at 0.65m hence soil improvement should be carried out";
+      515 — General note states SBC=24.98 t/sqm @ 0.50m; trial pit shows
+      SBC=21 t/sqm @ 1.0m; certificate states SBC=26.5 t/sqm @ 1.50m;
+      BOF=375.814 (≈1.8m below BL=377.614) — none of the three SBC values
+      correspond to BOF depth. Annotations: "AT WHAT DEPTH" and "GIVE SBC
+      AT BOTTOM OF RCC BOX".
+    reference: "IRS Bridge Substructure Code 2013, Cl.4.4"
+    check_type: qualitative
+    param_required: [sbc_stated_at_foundation_level]
+    failure_message: >
+      SBC is not stated at actual foundation level, OR multiple inconsistent
+      SBC values at different depths appear on the drawing (general notes,
+      trial pit, certificate). Reconcile to a SINGLE SBC value stated at
+      the actual BOF (Bottom of Foundation) level = {bof_level} m. State
+      this value clearly: "SBC of soil at foundation level (RL {bof_level} m)
+      = X t/sqm" and compare max foundation pressure against this value only.
+
+  - id: MB_F2
+    category: FOUNDATION
+    severity: CRITICAL
+    title: "Foundation pressure exceeds SBC at foundation level"
+    description: >
+      Maximum foundation pressure at box foundation level must be less
+      than the SBC of soil at that level. Where SBC < max pressure,
+      soil improvement (sand filling + boulder filling, compacted) is
+      mandatory before constructing the foundation.
+      Source: 24KK — "PROVIDE SAND FILLING AND BOULDER FILLING AS SBC
+      IS LESS THAN MAX FOUNDATION PRESSURE";
+      24MB — "SBC as per soil report < max. foundation pressure; provide
+      350mm soil filling followed by 350mm boulder filling duly compacted";
+      27KK — "Engineer-in-charge should ensure SBC of soil at foundation
+      level is more than maximum foundation pressure".
+    reference: "IRS Bridge Substructure Code 2013, Cl.4.4"
+    check_type: qualitative
+    param_required: [foundation_pressure_within_sbc]
+    failure_message: >
+      Foundation pressure exceeds SBC at foundation level. Mandatory soil
+      improvement required: provide 350mm sand filling + 350mm boulder
+      filling (duly compacted) before laying levelling course. Note to be
+      added on drawing. SBC to be re-verified after improvement.
+
+  - id: MB_F3
+    category: FOUNDATION
+    severity: CRITICAL
+    title: "Foundation depth tentative — not finalised"
+    description: >
+      Foundation depth shown in drawing is tentative. While this note
+      is standard, the drawing must also confirm that the foundation will
+      be placed on non-erodible strata, and Engineer-in-Charge will verify
+      at site. The note "depth is tentative" without the non-erodible
+      strata requirement is insufficient.
+      Pattern: All 10 GADs have this note.
+    reference: "IRS Bridge Substructure Code 2013"
+    check_type: presence
+    param_required: [non_erodible_strata_note_present]
+    failure_message: >
+      Drawing must state: "RCC Box shall be placed on non-erodible strata.
+      Depth of foundation shown is tentative; actual depth shall be decided
+      by Engineer-in-Charge." Both conditions must be stated together.
+
+  - id: MB_F4
+    category: FOUNDATION
+    severity: MAJOR
+    title: "SBC inconsistent with soil type in bore log"
+    description: >
+      The SBC value stated on drawing must be consistent with the soil
+      strata description in the bore log/trial pit. A high SBC value
+      (e.g., 15+ t/m²) is inconsistent with medium compressibility
+      silty clay or soft soil strata. Where inconsistency exists,
+      the soil report must be re-verified.
+      Source: 2KK — "VALUE INCONSISTENT WITH TYPE OF SOIL PRESENT —
+      SOIL REPORT TO BE VERIFIED" (appearing twice, for both RCC box
+      and return wall foundations).
+    reference: "IS 1888 / IS 6403 / IRS Substructure Code Cl.4.4"
+    check_type: qualitative
+    param_required: [sbc_consistent_with_soil_type]
+    failure_message: >
+      SBC value appears inconsistent with soil type described in bore log.
+      Silty clay / medium compressibility soils typically yield SBC of
+      8-15 t/m². Re-verify soil report — the settlement analysis calculation
+      must justify the recommended SBC value. Incomplete settlement
+      calculations in soil report are not acceptable.
+
+  - id: MB_F5
+    category: FOUNDATION
+    severity: MAJOR
+    title: "Bore log details on drawing not matching soil test report"
+    description: >
+      Soil strata description, depths, and SBC values shown in the
+      trial pit/bore log on the GAD must exactly match the geotechnical
+      investigation report. Any discrepancy must be corrected.
+      Source: 7KK — "Bore log details need to be corrected as per soil
+      test report"; 2KK — settlement analysis in Annexure VIII is
+      incomplete, recommended SBC not justified by calculations.
+    reference: "IS 1892 / IS 2131 / Geotechnical investigation practice"
+    check_type: qualitative
+    param_required: [bore_log_matches_soil_report]
+    failure_message: >
+      Bore log/trial pit details on GAD do not match geotechnical
+      investigation report. Correct strata description, depths, and
+      SBC values to exactly match the approved soil report. Settlement
+      analysis calculations must be complete and justify recommended SBC.
+
+  - id: MB_F6
+    category: FOUNDATION
+    severity: MAJOR
+    title: "GL shown on drawing inconsistent with site/soil report NGL"
+    description: >
+      Ground Level (GL/NGL) shown on drawing must match the value in
+      the soil investigation report and site photographs. Where GL has
+      been changed from previous submission without explanation, site
+      photographs must be attached to confirm the variation.
+      Source: 2KK — "GL SHOWN HIGHER AND CHANGED FROM PREVIOUS VALUES,
+      SITE PICS TO BE ATTACHED TO CONFIRM THE VARIATION";
+      27KK — "Soil report NGL is much lower than Exg. BL — needs to be
+      reviewed and corrected".
+    reference: "Drawing accuracy requirement"
+    check_type: qualitative
+    param_required: [gl_consistent_with_soil_report]
+    failure_message: >
+      GL shown on drawing inconsistent with soil investigation report NGL
+      or site conditions. Attach site photographs to confirm ground level.
+      GL must be shown on elevation view also, not just trial pit sketch.
+      Any change from previous submission must be explained.
+
+  - id: MB_F7
+    category: FOUNDATION
+    severity: MAJOR
+    title: "SBC stated at standard depth not at foundation bottom — depth mismatch"
+    description: >
+      A specific sub-case of MB_F1: Where the SBC is certified by DyCE
+      at a standard depth (e.g., 1.50m, 1.80m, 2.0m) but the actual
+      foundation bottom (BOF) is at a DIFFERENT depth, the SBC used
+      for design is incorrect. The certificate and drawing must both
+      state SBC at the actual foundation depth.
+      Source: 6KK — "mention SBC at 1.80m depth AND mention SBC at
+      foundation level of RCC box" (two different values required);
+      27KK — "foundation is at 1.35m whereas SBC mentioned is at 1.50m".
+    reference: "IRS Bridge Substructure Code 2013, Cl.4.4"
+    check_type: qualitative
+    param_required: [sbc_depth_matches_foundation_depth]
+    failure_message: >
+      SBC is certified at a standard test depth that differs from actual
+      foundation bottom depth. State SBC at BOTH the standard depth AND
+      the actual foundation level depth. The design must use the SBC at
+      the actual foundation level.
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION C — DRAWING CONVENTION / COLOUR CODING (Minor Bridges)
+  # ══════════════════════════════════════════════════════════
+
+  - id: MB_D1
+    category: DRAWING
+    severity: MAJOR
+    title: "Existing bridge details shown in wrong colour (red instead of black)"
+    description: >
+      Standard drawing convention: Existing works = BLACK, Proposed
+      works = RED, Dismantling = YELLOW DOTTED. Showing existing bridge
+      details in red is a serious drafting error that creates confusion
+      during field execution about what is new and what exists.
+      Source: 7KK — FOUR separate annotations "why in red colour?" for
+      existing bridge elements; 24KK — "SHOW DISMANTLING IN YELLOW DOTTED".
+    reference: "SCR GAD drawing convention / IRBM 2024"
+    check_type: qualitative
+    param_required: [drawing_colour_convention_correct]
+    failure_message: >
+      Existing bridge elements shown in red colour instead of black.
+      Mandatory convention: Existing = BLACK, Proposed = RED, Dismantling
+      = YELLOW DOTTED. Correct all colour coding throughout the drawing.
+
+  - id: MB_D2
+    category: DRAWING
+    severity: MAJOR
+    title: "Station names not shown on site plan and L-section"
+    description: >
+      Station names at both ends of the section (FROM station and TO station)
+      must be shown on the site plan, L-section, and in the track details
+      table. Omission makes the drawing ambiguous for field staff.
+      Source: 6KK — "exg stations data to be shown in black ink";
+      11KK — "Station names need to be shown";
+      23KK — "show exg station data in black ink".
+    reference: "GAD drawing completeness requirement"
+    check_type: presence
+    param_required: [station_names_shown_both_ends]
+    failure_message: >
+      Station names not shown at both ends of the bridge on site plan and
+      L-section. Add FROM station and TO station names in black ink on
+      site plan, both plan views, and both elevation views.
+
+  - id: MB_D3
+    category: DRAWING
+    severity: MINOR
+    title: "Track alignment and grade of existing bridge not matching completion drawing"
+    description: >
+      Alignment (straight/curve) and grade (level/gradient) of the
+      existing bridge as shown in track details table must match the
+      completion drawing of the existing bridge. Errors here propagate
+      to formation level calculations.
+      Source: 7KK — "as per completion drawing exg track alignment is
+      STRAIGHT (not curve as shown)"; "as per completion drawing exg
+      track gradient is LEVEL (not gradient as shown)".
+    reference: "Completion drawing verification requirement"
+    check_type: qualitative
+    param_required: [existing_track_details_match_completion_drg]
+    failure_message: >
+      Track alignment/grade of existing bridge does not match completion
+      drawing. Cross-check alignment (straight/curve) and grade (level/
+      gradient) of existing line against existing bridge completion drawing
+      and correct accordingly.
+
+  - id: MB_D4
+    category: DRAWING
+    severity: MAJOR
+    title: "Flow direction on drawing does not match completion drawing"
+    description: >
+      Flow direction arrow on the proposed GAD must match the flow
+      direction shown on the existing bridge completion drawing.
+      Incorrect flow direction may result in the proposed bridge being
+      placed on the wrong side (U/S vs D/S), affecting scour depth
+      and bed level selection.
+      Source: 7KK — "direction of flow not matching with the Comp. Drg.
+      May be reviewed and corrected if necessary."
+    reference: "Completion drawing cross-check requirement"
+    check_type: qualitative
+    param_required: [flow_direction_matches_completion_drg]
+    failure_message: >
+      Flow direction on GAD does not match existing bridge completion
+      drawing. Incorrect flow direction may affect upstream/downstream
+      designation and scour calculations. Verify and correct.
+
+  - id: MB_D5
+    category: DRAWING
+    severity: MAJOR
+    title: "C/C track distance on GAD differs from L-section drawing"
+    description: >
+      Centre-to-centre track distance shown on GAD must match the value
+      in the approved L-section drawing for the project. Discrepancy
+      indicates either the GAD or the L-section is incorrect.
+      Source: 7KK — "as per L-Section c/c tracks is 9.2m. In GAD same
+      shown as 9.616m — may be reviewed and corrected if necessary."
+    reference: "IRPWM 2019 / L-section drawing cross-check"
+    check_type: qualitative
+    param_required: [track_centres_match_l_section]
+    failure_message: >
+      C/C track distance on GAD does not match the L-section drawing.
+      Verify against approved L-section and correct the GAD. Minimum
+      5300mm per IRPWM; project-specific value from approved working section.
+
+  - id: MB_D6
+    category: DRAWING
+    severity: MINOR
+    title: "Degree of curvature not mentioned on curved alignment"
+    description: >
+      Where the bridge is on a curve, the degree of curvature must be
+      explicitly stated in the track details table and on the site plan.
+      Source: 7KK — "mention degree of curvature" (annotated twice, on
+      both the existing and proposed track curve designations).
+    reference: "GAD drawing completeness / IRPWM 2019"
+    check_type: qualitative
+    param_required: [curve_degree_mentioned_if_curved]
+    failure_message: >
+      Degree of curvature not stated for curved alignment. State degree
+      of curvature (degrees per chain or radius in metres) in track
+      details table and on site plan for both existing and proposed lines.
+
+  - id: MB_D7
+    category: DRAWING
+    severity: MINOR
+    title: "Existing bridge foundation details not shown"
+    description: >
+      The foundation details of the existing bridge (BOF level, foundation
+      type, dimensions) must be shown on the elevation/section to allow
+      assessment of interaction with proposed foundation excavation.
+      Source: 7KK — "show existing foundation details" (annotated twice
+      on elevation and section).
+    reference: "Drawing completeness for adjacent construction"
+    check_type: presence
+    param_required: [existing_foundation_details_shown]
+    failure_message: >
+      Existing bridge foundation details (bottom of foundation level,
+      foundation type, approximate dimensions) not shown on elevation/
+      section. These are necessary to assess impact of proposed foundation
+      excavation on existing bridge stability.
+
+  - id: MB_D8
+    category: DRAWING
+    severity: MINOR
+    title: "Existing shear keys not shown on elevation"
+    description: >
+      Existing arch bridges or old bridges may have shear keys at the
+      foundations. These must be shown on the elevation to ensure the
+      proposed adjacent foundation excavation does not undermine them.
+      Source: 7KK — "show existing shear keys".
+    reference: "Construction safety / IRBM 2024"
+    check_type: qualitative
+    param_required: [existing_shear_keys_shown_if_present]
+    failure_message: >
+      Existing shear keys not shown on elevation. Check existing bridge
+      completion drawing for shear key details and show on the GAD to
+      assess interaction with proposed foundation works.
+
+  - id: MB_D9
+    category: DRAWING
+    severity: MAJOR
+    title: "Existing bridge details do not match completion drawing — multiple parameters"
+    description: >
+      ALL details of the existing bridge (span, levels, flow direction,
+      alignment, grade, foundation) shown on the GAD must match the
+      existing bridge completion drawing. Where discrepancies exist,
+      a field joint inspection must resolve them.
+      Source: 7KK — "some details of exg bridge shown in the GAD are NOT
+      MATCHING with the Comp. Drg. May be reviewed and corrected."
+    reference: "Completion drawing cross-check requirement"
+    check_type: qualitative
+    param_required: [existing_bridge_details_verified_against_completion_drg]
+    failure_message: >
+      Existing bridge details (span, levels, alignment, grade, flow direction)
+      do not match the existing completion drawing. Conduct field joint
+      inspection at AEN level. Correct all discrepancies between GAD and
+      completion drawing before resubmission.
+
+  - id: MB_D10
+    category: DRAWING
+    severity: MAJOR
+    title: "Difference between FL and BL not matching completion drawing"
+    description: >
+      The difference between Formation Level and Bed Level on the GAD
+      must be consistent with the corresponding values on the existing
+      bridge completion drawing (accounting for datum differences).
+      A mismatch indicates incorrect level data.
+      Source: 24KK — "DIFFERENCE BETWEEN FL AND BL IS NOT MATCHING
+      WITH COMP DRG — TO BE VERIFIED/CORRECTED IF REQUIRED."
+    reference: "Level verification against completion drawing"
+    check_type: qualitative
+    param_required: [fl_bl_difference_matches_completion_drg]
+    failure_message: >
+      Difference between Formation Level and Bed Level on GAD does not
+      match the existing bridge completion drawing. Verify all levels
+      against completion drawing and correct. Note any datum offset
+      and reconcile values.
+
+  - id: MB_D11
+    category: DRAWING
+    severity: MINOR
+    title: "Weep holes not shown in return walls"
+    description: >
+      Weep holes must be shown in return walls, wing walls, and abutments
+      in addition to the reference note. The location, diameter, spacing,
+      and filter media (graded gravel) must be shown.
+      Source: 7KK — "weep holes?"; 19KK — "weep holes and filter media
+      missing"; 27KK — "Show weep holes in return wall".
+    reference: "DRG GM(W)SC/BR/1453-90 / IRS Substructure Code"
+    check_type: presence
+    param_required: [weep_holes_shown_in_return_walls]
+    failure_message: >
+      Weep holes not shown in return walls. Show 75/100mm dia PVC/AC pipe
+      weep holes at 1000mm c/c (staggered) with graded gravel filter media
+      behind, in all return walls, wing walls, and abutment back walls.
+      Reference DRG GM(W)SC/BR/1453-90.
+
+  - id: MB_D12
+    category: DRAWING
+    severity: MINOR
+    title: "Uniformity of GAD format not maintained across bridges in same project"
+    description: >
+      All GADs for bridges in the same doubling project must follow a
+      uniform format: same title block layout, same note numbering, same
+      label style, same section headings. Non-uniformity creates confusion
+      during bulk review and approval.
+      Source: 11KK — "Uniformity in GAD format needs to be maintained."
+    reference: "CAO/C design section drafting standards"
+    check_type: qualitative
+    param_required: [gad_format_uniform_with_project_set]
+    failure_message: >
+      GAD format not uniform with other bridges in the same project set.
+      Standardise: title block, note numbering sequence, section labels,
+      hydraulic particulars table format, and track details table across
+      all GADs in the project.
+
+  - id: MB_D13
+    category: DRAWING
+    severity: MINOR
+    title: "Section representation incorrect or improper"
+    description: >
+      The section cutting plane must be clearly marked on plan view and
+      the resulting section must accurately represent all elements
+      (box barrel, return walls, foundation, soil strata).
+      Source: 19KK — "Make proper representation"; "The sectional drawing
+      shall be properly represented."
+    reference: "Drawing standards / IS 696"
+    check_type: qualitative
+    param_required: [section_representation_correct]
+    failure_message: >
+      Section representation is incorrect or improperly drafted. Ensure
+      section cutting plane is marked on plan, section matches plan
+      geometry, and all elements are correctly represented in section.
+
+  - id: MB_D14
+    category: DRAWING
+    severity: MINOR
+    title: "Component labels missing on section/elevation"
+    description: >
+      All structural components shown on section and elevation must be
+      labelled: wearing course, levelling course, RCC box, haunch,
+      curtain wall, drop wall, toe wall, flooring, pitching, inspection
+      steps, parapet wall, etc.
+      Source: 11KK — "Needs proper labeling of components"; 19KK similar.
+    reference: "Drawing completeness standard"
+    check_type: qualitative
+    param_required: [components_properly_labelled]
+    failure_message: >
+      Component labels missing on section/elevation. Label all structural
+      elements: wearing course (with thickness), RCC box (with thickness),
+      levelling course, haunches, curtain/drop/toe walls, flooring, pitching,
+      filter media, weep holes, inspection steps.
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION D — RCC BOX SPECIFIC CHECKS (Minor Bridges)
+  # ══════════════════════════════════════════════════════════
+
+  - id: MB_B1
+    category: RCC_BOX
+    severity: CRITICAL
+    title: "CAO/C approval for RCC box with insufficient earth cushion not obtained/attached"
+    description: >
+      Where earth cushion (ballast + earth fill above top slab) is less
+      than the standard minimum required for the RCC box type adopted,
+      specific approval from CAO/C must be obtained and the approval
+      reference (e-file number) must be stated on the drawing AND a
+      special note must be added. The actual file number must be filled —
+      not left blank.
+      Source: 6KK — "SPECIAL NOTE: add a special note for adopting the
+      RCC box for inadequate earth cushion";
+      23KK — "CAO APPROVAL TO BE TAKEN FOR BOXES WITH LESS CUSHION AND ATTACH";
+      24KK — "CAO APPROVAL SHOULD BE OBTAINED FOR RCC BOX OF INSUFFICIENT
+      EARTH CUSHION AND ATTACHED";
+      27KK — "CAO/C APPROVAL FOR ADOPTING RCC BOX WITHOUT SUFFICIENT CUSHION
+      HAS BEEN OBTAINED VIDE FILE NO: SCR-CAOC0ENGC(CMNB)/97/2026 (UNDER PROCESS)".
+    reference: "Railway Board Letter / CAO/C policy for reduced cushion"
+    check_type: qualitative
+    param_required: [cao_approval_for_reduced_cushion_obtained]
+    failure_message: >
+      Earth cushion is less than standard minimum for this RCC box type.
+      CAO/C approval is MANDATORY before this GAD can be approved/tendered.
+      Obtain approval, fill in the complete e-file number on the drawing,
+      and add a special note: "CAO/C approval for adopting RCC box with
+      reduced earth cushion has been obtained vide file no. [XXX]."
+
+  - id: MB_B2
+    category: RCC_BOX
+    severity: MAJOR
+    title: "RCC box concrete grade M-35 required but lower grade specified"
+    description: >
+      For RCC box barrels with span or height >= 4.0m: minimum grade M-35.
+      For RCC box barrels with span AND height both < 4.0m: minimum M-30 acceptable.
+      Substructure, return walls, foundation: minimum M-25.
+      Wearing coat, curtain wall, drop wall: M-20.
+      Pattern from all 10 GADs consistently.
+    reference: "IRS CBC 2014 / SCR design section standard"
+    check_type: qualitative
+    param_required: [rcc_box_concrete_grade_correct]
+    failure_message: >
+      RCC box concrete grade incorrect. Required: M-35 for box span or
+      height >= 4.0m; M-30 for box with both span and height < 4.0m;
+      M-25 for substructure/return walls; M-20 for wearing coat/curtain wall.
+      Update material specification notes.
+
+  - id: MB_B3
+    category: RCC_BOX
+    severity: MAJOR
+    title: "Foundation pressure calculation not shown — only RDSO standard value cited"
+    description: >
+      Maximum foundation pressure under RCC box must be calculated based
+      on the actual structural design, not simply adopted from RDSO standard
+      drawings. If RDSO standard value is used, it must be verified that
+      the site conditions (fill height, span, load) match the RDSO standard.
+      Source: 23KK — "is this pressure calculated or RDSO standard?
+      If not RDSO, add calculation."
+    reference: "IRS Substructure Code 2013 / RDSO standard drawing notes"
+    check_type: qualitative
+    param_required: [foundation_pressure_calculation_source_stated]
+    failure_message: >
+      Source of maximum foundation pressure value not stated. Clarify
+      whether value is from RDSO standard drawing (state drawing number
+      and verify conditions match) or from site-specific calculation
+      (attach calculation). Ambiguity not acceptable at tender stage.
+
+  - id: MB_B4
+    category: RCC_BOX
+    severity: MAJOR
+    title: "Junction between proposed RCC box and existing bridge not detailed"
+    description: >
+      Where the proposed RCC box abuts an existing bridge (arch, STC, slab),
+      the junction arrangement must be clearly shown: how the new box wall
+      meets the existing abutment face, leak-proofing method, and any
+      special shutter/waterproofing arrangement. Where the existing bridge
+      has a cut-water for pier, the abutting arrangement needs review.
+      Source: 7KK — "show this junction correctly; show cut water for pier;
+      the proposed RCC box is made to abut existing bridge — abutting of
+      proposed RCC box with existing bridge may be reviewed."
+    reference: "IRBM 2024 / Construction detailing requirement"
+    check_type: presence
+    param_required: [junction_with_existing_bridge_detailed]
+    failure_message: >
+      Junction between proposed RCC box and existing bridge not adequately
+      detailed. Show: exact interface between new box wall and existing
+      abutment, leak-proofing arrangement, and how any existing features
+      (shear keys, cut-water) are accommodated. Add enlarged detail if needed.
+
+  - id: MB_B5
+    category: RCC_BOX
+    severity: MAJOR
+    title: "CAO/C approval for RCC box adoption not referenced with RB letter"
+    description: >
+      Where RCC box is adopted in lieu of standard arch/STC span, the
+      CAO/C approval note must mention the relevant Railway Board letter
+      that authorises reduced cushion or non-standard adoption.
+      Source: 7KK — "Mention reference of CAO/SCR approval for RCC box,
+      duly mentioning the relevant Railway Board's letter."
+    reference: "Railway Board approval procedure"
+    check_type: qualitative
+    param_required: [cao_approval_references_rb_letter]
+    failure_message: >
+      CAO/C approval note does not mention the Railway Board letter
+      authorising RCC box adoption. Update the approval note to include:
+      "as per Railway Board letter no. [XXX] dated [DD/MM/YYYY]".
+
+  - id: MB_B6
+    category: RCC_BOX
+    severity: MINOR
+    title: "Coping level below formation level — coping must be above formation"
+    description: >
+      Top of coping of return walls must be at or above formation level
+      so that coping does not remain buried. A coping below formation
+      level serves no functional purpose and may cause drainage issues.
+      Source: 27KK — "Coping to be above formation level."
+    reference: "Standard practice / IRBM 2024"
+    check_type: qualitative
+    param_required: [coping_level_at_or_above_formation]
+    failure_message: >
+      Top of coping level is below formation level. Coping must be at
+      or above formation level. Revise return wall height and coping
+      level accordingly.
+
+  - id: MB_B7
+    category: RCC_BOX
+    severity: NOTE
+    title: "T.O.A label not defined — unexplained abbreviation on drawing"
+    description: >
+      All abbreviations used on the drawing must be defined in a legend
+      or explained in the notes. T.O.A (Top of Abutment), T.O.C (Top of
+      Coping), B.O.F (Bottom of Foundation) etc. must be consistently
+      used and defined.
+      Source: 27KK — "what is T.O.A?" annotation by reviewer.
+    reference: "Drawing convention / IS 696"
+    check_type: qualitative
+    param_required: [abbreviations_defined_in_legend]
+    failure_message: >
+      Abbreviations on drawing (T.O.A, T.O.C, B.O.F, BOS etc.) not
+      defined in legend. Add a legend/abbreviations list to the drawing
+      or spell out first occurrence of each abbreviation.
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION E — SAFETY / MODUS OPERANDI CHECKS (Minor Bridges)
+  # ══════════════════════════════════════════════════════════
+
+  - id: MB_S1
+    category: SAFETY
+    severity: MAJOR
+    title: "Safety arrangements between existing and proposed bridges not specified"
+    description: >
+      A specific note must be added in Modus Operandi specifying safety
+      arrangements to be maintained between the existing and proposed
+      bridge during construction (shoring, sheet piling, monitoring,
+      restricted excavation near existing foundations).
+      Source: 6KK annotation — "NECESSARY SAFETY ARRANGEMENTS TO BE MADE
+      BETWEEN EXG. AND PRO. BRIDGE TO ENSURE THE SAFETY OF THE EXG. BRIDGE."
+      (Appears in multiple GADs as annotation item 10 of Modus Operandi).
+    reference: "IRPWM 2019 / Construction safety requirement"
+    check_type: presence
+    param_required: [safety_arrangements_between_bridges_noted]
+    failure_message: >
+      Safety arrangement note between existing and proposed bridge not
+      included in Modus Operandi. Add as item in MO: "Necessary safety
+      arrangements to be made between existing and proposed bridge during
+      construction to ensure the safety of the existing bridge."
+
+  - id: MB_S2
+    category: SAFETY
+    severity: MAJOR
+    title: "Min BCM working space (2575mm) not provided in inter-track gap"
+    description: >
+      Minimum clearance of 2575mm is required between the nearest
+      obstruction and track centre for BCM (Ballast Cleaning Machine)
+      working. Where the inter-track gap or the return wall height
+      encroaches on this clearance, BCM working will be restricted.
+      Source: 27KK — "Min 2575mm required for BCM working."
+    reference: "IRPWM 2019 / BCM working envelope"
+    check_type: qualitative
+    param_required: [bcm_working_clearance_provided]
+    failure_message: >
+      Minimum 2575mm clearance for BCM working not provided. Verify
+      clearance between track centre and nearest obstruction (return
+      wall, parapet, coping) meets BCM envelope requirements per IRPWM.
+
+  - id: MB_S3
+    category: SAFETY
+    severity: NOTE
+    title: "Engineering speed indicator drawing reference not cited"
+    description: >
+      Modus Operandi must reference the standard drawing for Temporary
+      Engineering Speed Indicators. Reference drawing:
+      GM(W)SC/BR/2570/2009.
+      Source: 7KK — "Mention reference of drawing number for Temporary
+      Engineering Speed Indicators diagram";
+      24KK — "5. FOR ENGINEERING INDICATORS REFER GM(W)SC/BR/2570/2009."
+    reference: "DRG GM(W)SC/BR/2570/2009 / IRPWM 2019"
+    check_type: presence
+    param_required: [engg_speed_indicator_drg_referenced]
+    failure_message: >
+      Reference drawing for temporary engineering speed indicators not
+      cited in Modus Operandi. Add: "For details of engineering speed
+      indicators refer DRG. No. GM(W)SC/BR/2570/2009."
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION F — CERTIFICATES & APPROVALS (Minor Bridges)
+  # ══════════════════════════════════════════════════════════
+
+  - id: MB_C1
+    category: CERTIFICATE
+    severity: MAJOR
+    title: "Past history of bridge not mentioned in DyCE certificate"
+    description: >
+      DyCE/C certificate must explicitly state the past history of the
+      bridge (any floods above HFL, damage, repairs, past failures).
+      "No past history" is an acceptable entry but must be explicitly stated.
+      Source: 7KK — "mention about past history also."
+    reference: "IRBM 2024 / Bridge inspection certificate requirement"
+    check_type: presence
+    param_required: [past_history_stated_in_certificate]
+    failure_message: >
+      Past history of bridge not stated in DyCE/C certificate. Add:
+      "Past history of bridge: [describe history or state 'No past history']."
+      This is a mandatory field in the certificate.
+
+  - id: MB_C2
+    category: CERTIFICATE
+    severity: MAJOR
+    title: "SBC in DyCE certificate not at correct depth or ambiguous"
+    description: >
+      DyCE certificate stating SBC must specify: (a) depth below bed level
+      at which SBC was determined, and (b) the SBC value at that depth.
+      Where SBC is stated "at 1.50m depth" but foundation is at a different
+      depth, a separate verification is needed.
+      Source: Multiple — 6KK, 23KK, 27KK all have this annotation.
+    reference: "IRS Substructure Code 2013 / DyCE certification practice"
+    check_type: qualitative
+    param_required: [sbc_in_certificate_states_depth]
+    failure_message: >
+      SBC in DyCE certificate does not state the depth at which it was
+      determined, or the depth stated differs from actual foundation depth.
+      Certificate must state: "SBC of soil = X t/m² at Y m depth below
+      bed level." Verify SBC at actual foundation level separately.
+
+  - id: MB_C3
+    category: CERTIFICATE
+    severity: MAJOR
+    title: "Soundness of existing bridge for 25T/2008 not certified by DyCE/C/Designs"
+    description: >
+      CAO/C/Designs certificate that existing bridge is not affected by
+      25T/2008 loading of proposed bridge must be present on the drawing.
+      Source: Pattern from 7KK — "to be certified by Dy.CE/D/C/SC" and
+      "2008 loading standard" annotations; all 10 GADs have this certificate.
+    reference: "SCR/HQ policy for doubling GAD approval"
+    check_type: presence
+    param_required: [designs_certificate_for_25t_loading_present]
+    failure_message: >
+      Certificate by DyCE/C/Designs that existing bridge is not affected
+      by 25T/2008 loading of proposed bridge is missing. This certificate
+      is mandatory on all doubling GADs.
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION G — MULTI-LINE / YARD BRIDGES (Minor Bridges)
+  # ══════════════════════════════════════════════════════════
+
+  - id: MB_Y1
+    category: MULTI_LINE
+    severity: MAJOR
+    title: "Separate elevations not drawn for different line groups at yard bridges"
+    description: >
+      At yard locations with multiple proposed lines (e.g., main line +
+      loop lines), where CHFL differs between line groups due to different
+      formation levels, separate half elevations must be drawn for each
+      group showing the correct CHFL and FB for each.
+      Source: 24MB — "2 separate elevations to be shown: 1st for loop
+      line 1 and main line; 2nd for LL-2,3,4. CHFL for 2nd elevation
+      is 169.393."
+    reference: "GAD drafting standard for multi-line bridges"
+    check_type: qualitative
+    param_required: [separate_elevations_for_each_line_group]
+    failure_message: >
+      Separate elevations not drawn for different line groups with
+      different CHFLs. Draw separate half elevations showing correct
+      CHFL and FB for each line group. State CHFL for each group
+      explicitly.
+
+  - id: MB_Y2
+    category: MULTI_LINE
+    severity: MAJOR
+    title: "Minimum 3 bore holes not taken between proposed multiple lines"
+    description: >
+      Where multiple proposed lines are being extended simultaneously
+      (yard expansion), bore holes must be taken at sufficient intervals
+      — minimum 3 bore holes spread across the proposed lines — to
+      characterise soil variability across the width.
+      Source: 24MB — "a minimum of 3 bore holes between the proposed
+      lines should be taken."
+    reference: "IS 1892 / Geotechnical investigation practice"
+    check_type: qualitative
+    param_required: [adequate_bore_holes_for_multi_line]
+    failure_message: >
+      Insufficient bore holes for multi-line bridge proposal. Minimum
+      3 bore holes required spread across all proposed lines to characterise
+      soil conditions. Take additional bore holes and update bore log on drawing.
+
+  - id: MB_Y3
+    category: MULTI_LINE
+    severity: MAJOR
+    title: "Track centre distance less than 5300mm — explore increasing to 5300mm"
+    description: >
+      Where track centre distance is less than 5300mm (minimum per IRPWM),
+      the possibility of increasing it to at least 5300mm must be explored
+      and confirmed/rejected with justification.
+      Source: 24MB — "the possibility of increasing the t/c to 5.30m
+      shall be explored."
+    reference: "IRPWM 2019 — minimum track centre 5300mm"
+    check_type: qualitative
+    param_required: [track_centre_minimum_5300mm_confirmed]
+    failure_message: >
+      Track centre distance is less than 5300mm minimum per IRPWM 2019.
+      Explore possibility of increasing to 5300mm. If not feasible,
+      provide written justification and obtain specific approval.
+
+  - id: MB_Y4
+    category: MULTI_LINE
+    severity: MAJOR
+    title: "Crossovers not shown on plan for yard bridge"
+    description: >
+      Where proposed bridge serves yard lines with crossovers/turnouts,
+      the location and layout of crossovers must be shown on the plan
+      to confirm that the bridge barrel length adequately covers the
+      full extent of the yard.
+      Source: 24MB — "show any crossovers if present for common loop
+      line-1 and up main line."
+    reference: "GAD completeness for yard bridges"
+    check_type: qualitative
+    param_required: [crossovers_shown_if_present]
+    failure_message: >
+      Crossovers/turnouts not shown on plan. Show the layout of all
+      crossovers and turnouts on the plan view to verify barrel length
+      adequacy and confirm no track feature is located over a joint.
+
+  - id: MB_Y5
+    category: MULTI_LINE
+    severity: NOTE
+    title: "RCC box size for loop lines stated 'as per design' — not yet finalised"
+    description: >
+      For multiple loop lines, the RCC box size for each line group must
+      be explicitly stated on the drawing. "As per design" is not acceptable
+      at approval/tender stage.
+      Source: 24MB — "1.1 RCC BOX FOR COMMON LL-2,3,4 : AS PER DESIGN"
+      annotated as not acceptable.
+    reference: "GAD approval standard"
+    check_type: qualitative
+    param_required: [all_line_box_sizes_stated_explicitly]
+    failure_message: >
+      RCC box size for one or more loop lines stated as "as per design"
+      rather than explicitly specified. All box dimensions must be stated
+      on GAD before approval. Complete the structural design and update drawing.
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION H — DIMENSION VERIFICATION (Minor Bridges)
+  # Source: Br.No.515, Ch:289255.680m, MBNR-Dhone Section, HYB Division
+  # ══════════════════════════════════════════════════════════
+
+  - id: MB_V1
+    category: DIMENSION_VERIFICATION
+    severity: MAJOR
+    title: "Section dimensions not cross-verified against level differences"
+    description: >
+      Vertical dimensions shown in section/elevation (e.g., wall heights,
+      offsets) must equal the arithmetic difference between the two RL
+      values they connect, plus any stated offset. Where a dimension is
+      drawn independently of the levels, it may not match — the drafter
+      must verify: dimension = (RL_top - RL_bottom) + offset.
+      Source: 515 — annotations "75 given in elevation" and
+      "688 as per levels+75" indicate a dimension of 688mm must equal
+      the level difference plus a 75mm offset; drafter must verify this
+      arithmetic before finalising.
+    reference: "Drawing accuracy / internal consistency check"
+    check_type: qualitative
+    param_required: [section_dimensions_verified_against_levels]
+    failure_message: >
+      One or more vertical dimensions in section/elevation do not match
+      the arithmetic difference between the connected RL values (plus
+      stated offset). Recompute: dimension = (RL_top - RL_bottom) + offset,
+      and correct the drawn dimension to match.
+
+  - id: MB_V2
+    category: DIMENSION_VERIFICATION
+    severity: MAJOR
+    title: "Dimension shown does not match value in completion drawing"
+    description: >
+      Where a dimension on the proposed GAD relates to an existing
+      structure (e.g., existing wing wall length, existing barrel
+      dimension), it must match the value shown in the existing bridge's
+      completion drawing. Any discrepancy must be resolved by adopting
+      the completion drawing value, or by site verification.
+      Source: 515 — annotation "3465 as per comp drg" indicates a
+      dimension currently shown does not match the 3465mm value in the
+      completion drawing CAO/C/BR/65-98(COMP).
+    reference: "Completion drawing cross-check requirement"
+    check_type: qualitative
+    param_required: [existing_dimensions_match_completion_drg]
+    failure_message: >
+      Dimension shown for existing structure does not match completion
+      drawing value. Adopt the completion drawing dimension (or verify
+      at site if discrepancy persists) and correct the GAD accordingly.
+
+  - id: MB_V3
+    category: DIMENSION_VERIFICATION
+    severity: MINOR
+    title: "Floating/unconnected dimension numbers without leader lines"
+    description: >
+      Numeric dimension values appearing on the drawing without a
+      connecting dimension line/leader to the element they describe are
+      ambiguous and must be properly dimensioned. This is especially
+      common around drop wall, curtain wall, and wing wall details where
+      multiple closely-spaced dimensions are shown.
+      Source: 515 — multiple bare numbers (3301, 3451, 413, 826, 4089,
+      2101, 4202, 1763, 1950, 975, 2535) annotated "mark dim" / "MARK ALL
+      DIM" near drop wall and wing wall sections, indicating these values
+      lack proper dimension lines connecting them to specific elements.
+    reference: "Drawing office practice / IS 696"
+    check_type: qualitative
+    param_required: [all_dimensions_have_leader_lines]
+    failure_message: >
+      Floating dimension numbers found without dimension lines/leaders
+      connecting them to specific elements (commonly around drop wall,
+      curtain wall, wing wall details). Add proper dimension lines with
+      leaders for every numeric callout so each value unambiguously
+      describes one element.
+
+  - id: MB_V4
+    category: DIMENSION_VERIFICATION
+    severity: MINOR
+    title: "RL callout shown without clear annotation of what it represents"
+    description: >
+      Every RL (reduced level) value shown on the drawing must be clearly
+      labelled with what it represents (e.g., "Top of wing wall RL X.XXX",
+      "BOF RL X.XXX"). A bare RL number without a label is ambiguous.
+      Source: 515 — annotation "LEVEL 381.065" appears as a bare callout
+      without indicating which feature this level corresponds to.
+    reference: "Drawing labelling standard"
+    check_type: qualitative
+    param_required: [all_rl_callouts_labelled]
+    failure_message: >
+      RL value shown without label indicating which feature it represents.
+      Label every RL callout explicitly, e.g., "Top of Wing Wall RL 381.065 m".
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION I — MATERIAL SPEC COMPLETENESS (Minor Bridges)
+  # Source: Br.No.515
+  # ══════════════════════════════════════════════════════════
+
+  - id: MB_M1
+    category: MATERIAL
+    severity: MAJOR
+    title: "Wing wall and return wall not explicitly listed under M-25 concrete grade"
+    description: >
+      Material specification list for M-25 grade typically states
+      "Foundation & Sub Structure, Wearing Coat" but does NOT explicitly
+      list "Wing Wall" and "Return Wall" as separate items. Although wing/
+      return walls are part of substructure, explicit listing avoids
+      ambiguity during construction and billing.
+      Source: 515 — annotations "WING WALL AND RETURN WALL" and "WING AND"
+      placed near the M-25 material specification line, indicating these
+      elements should be explicitly added to the list.
+    reference: "IRS CBC 2014 / Material specification completeness"
+    check_type: qualitative
+    param_required: [wing_return_wall_explicitly_in_material_spec]
+    failure_message: >
+      Wing wall and return wall not explicitly listed in material
+      specification for M-25 grade concrete. Update specification to read:
+      "M-25: Foundation & Sub Structure, Wing Wall, Return Wall, Wearing Coat."
+
+  - id: MB_M2
+    category: MATERIAL
+    severity: MINOR
+    title: "Flooring not referenced to Chapter VIII of IRBM alongside pitching"
+    description: >
+      Modus Operandi note for protective works states "pitching to be dry
+      pitching as per Para 818 of IRBM" but does not also reference flooring
+      to Chapter VIII of IRBM. Both flooring and pitching specifications
+      derive from Chapter VIII and should be referenced together.
+      Source: 515 — annotations "FLOORING AND PITCHING------------" and
+      "CHAPTER VIII" placed near MO step 6, indicating flooring should
+      also be referenced to Chapter VIII of IRBM, not pitching alone.
+    reference: "IRBM 2024, Chapter VIII"
+    check_type: qualitative
+    param_required: [flooring_referenced_to_irbm_ch8]
+    failure_message: >
+      Flooring not referenced to Chapter VIII of IRBM alongside pitching
+      in Modus Operandi. Update MO step to read: "...protective works like
+      flooring, pitching, steps etc. are to be done as per Chapter VIII of
+      IRBM. Pitching to be dry pitching as per Para 818 of IRBM."
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION J — CERTIFICATE WORDING (Minor Bridges)
+  # Source: Br.No.515
+  # ══════════════════════════════════════════════════════════
+
+  - id: MB_C4
+    category: CERTIFICATE
+    severity: MINOR
+    title: "Design section certificate uses non-standard wording 'safe for dispersion'"
+    description: >
+      The CAO/C/SC design section certificate must use the STANDARD
+      wording: "the existing bridge is NOT AFFECTED BY [XX]t loading of
+      proposed bridge." Non-standard phrasing such as "existing bridge is
+      safe for dispersion of proposed bridge loading" should be corrected
+      to the standard form for consistency across all GADs and to avoid
+      ambiguity in legal/contractual interpretation.
+      Source: 515 — certificate reads "DYCE/C/DESIGN/HQ CERTIFIES THAT THE
+      EXISTING BRIDGE IS SAFE FOR DISPERSION OF PROPOSED BRIDGE 25t LOADING"
+      with annotation "NOT AFFECTED BY" suggesting the standard phrase
+      should replace "safe for dispersion of".
+    reference: "SCR/HQ certificate wording convention (per other GADs in series)"
+    check_type: qualitative
+    param_required: [design_certificate_uses_standard_wording]
+    failure_message: >
+      Design section certificate uses non-standard wording. Replace
+      "the existing bridge is safe for dispersion of proposed bridge
+      [XX]t loading" with the standard form: "the existing bridge is
+      NOT AFFECTED BY [XX]t-2008 loading of the proposed bridge."
+
+  - id: MB_C5
+    category: CERTIFICATE
+    severity: MAJOR
+    title: "Important Notes of Division section missing"
+    description: >
+      GADs in this series typically include an "IMPORTANT NOTES OF
+      DIVISION" section stating: (1) Division approval is for General
+      Arrangements of existing and proposed spans only, and (2) joint
+      inspection at AEN level required before starting work for safety
+      of existing line. Where this section is absent, it must be added
+      for consistency and to ensure divisional responsibilities are
+      documented.
+      Source: 515 — annotation "DIVISIONAL" with no corresponding
+      "Important Notes of Division" section found on the drawing
+      (present in 2KK, 6KK, 7KK, 19KK, 21KK, 23KK, 24KK, 27KK).
+    reference: "SCR GAD standard format (per series consistency)"
+    check_type: presence
+    param_required: [important_notes_of_division_present]
+    failure_message: >
+      "Important Notes of Division" section missing from drawing. Add:
+      "1. Division approval is given for General Arrangements of existing
+      and proposed spans only. 2. Before starting the work, joint inspection
+      at AEN level be done for safety of existing line." This section is
+      present in all other GADs of this project series and must be included
+      for consistency.
+
+  - id: MB_C6
+    category: CERTIFICATE
+    severity: MINOR
+    title: "Trial pit details incomplete — strata column not fully detailed"
+    description: >
+      Trial pit sketch must show a complete strata column with depth-wise
+      soil description (not just a single label like "Soft Disintegrated
+      Rock (SDR)" with one depth value). Compare with other GADs in series
+      which show multi-layer strata columns with SPT/depth annotations.
+      Source: 515 — annotation "TRIAL PIT DETAILS" pointing at a trial pit
+      sketch showing only "2.8m / Soft Disintegrated Rock (SDR)" — far less
+      detail than the multi-layer strata columns in 2KK, 6KK, 7KK, 19KK etc.
+    reference: "Geotechnical investigation reporting standard"
+    check_type: qualitative
+    param_required: [trial_pit_strata_column_complete]
+    failure_message: >
+      Trial pit details incomplete — only a single strata label and depth
+      shown. Provide a complete depth-wise strata column (similar to other
+      GADs in the project series) showing soil description at each depth
+      interval down to and below the foundation level, with SBC value at
+      each layer where available.
+
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION K — PCE/HQ OFFICIAL CHECKLIST RULES (Minor Bridges)
+  # Source: Official GAD Checklist — GNH-YARD-BR.NO.295-3
+  #   Section A (General), B (Notes), C (Instructions)
+  #   Signed by Dy. Chief Engineer / SSE-C-DRG-CPSN Construction
+  # Added: 2025-06-11
+  # Cross-reference: Items already covered by earlier rules are noted.
+  # ══════════════════════════════════════════════════════════
+
+  # ── Section A: GENERAL ──────────────────────────────────────────────────────
+
+  - id: MB_CL_A1
+    category: DRAWING
+    severity: MAJOR
+    title: "Name of work not correctly/completely mentioned"
+    description: >
+      Name of work must include all of: Railway name, Division, Project,
+      work description with location, and name of consultant (for EPC/
+      construction organisation works). Missing or incorrect name causes
+      ambiguity in approval chain and contract administration.
+    reference: "PCE/HQ GAD Checklist — Section A, Item 1"
+    check_type: presence
+    param_required: [name_of_work_complete]
+    failure_message: >
+      Name of work on drawing is incomplete. Must include: Railway name,
+      Division, Project name, work description with chainage/location,
+      and name of EPC agency / consultant.
+
+  - id: MB_CL_A2
+    category: DRAWING
+    severity: MAJOR
+    title: "Drawing number not correctly mentioned"
+    description: >
+      Drawing number must be correctly and completely filled in the title
+      block — no blanks, dashes, or TBD entries at approval/tender stage.
+    reference: "PCE/HQ GAD Checklist — Section A, Item 2"
+    check_type: presence
+    param_required: [drawing_number_complete]
+    failure_message: >
+      Drawing number in title block is incomplete or incorrectly mentioned.
+      Fill complete drawing number before issue for approval/tender.
+
+  - id: MB_CL_A3
+    category: DRAWING
+    severity: MINOR
+    title: "Scale not mentioned or drawing size below A1"
+    description: >
+      Scale must be stated on drawing. Drawing size must be not less than A1.
+      Original to be on tracing paper (converted to tracing cloth after
+      execution). NA is acceptable where scale cannot apply.
+    reference: "PCE/HQ GAD Checklist — Section A, Item 3"
+    check_type: qualitative
+    param_required: [drawing_scale_stated]
+    failure_message: >
+      Scale not stated on drawing, or drawing size is below A1 minimum.
+      State scale (e.g., 1:100) and ensure drawing is on tracing paper
+      of size A1 or larger.
+
+  - id: MB_CL_A4
+    category: DRAWING
+    severity: CRITICAL
+    title: "Name and signature of all involved officials not present"
+    description: >
+      Names and signatures of all officials involved in preparation of GAD
+      must be written clearly and signed with date. For construction
+      organisation works: Divisional officers' signatures also required.
+      Provision for HQ officials' signature must be made in title block.
+    reference: "PCE/HQ GAD Checklist — Section A, Item 4"
+    check_type: qualitative
+    param_required: [all_official_signatures_present]
+    failure_message: >
+      Names/signatures of all involved officials not present on drawing.
+      Required: drafter, checker, divisional officers (DyCE, AEN, SSE),
+      and provision for HQ officials (CE, DyCE/Design, CBE). All must
+      sign with date.
+
+  - id: MB_CL_A5
+    category: DRAWING
+    severity: MAJOR
+    title: "PB/sanction item reference not mentioned"
+    description: >
+      Reference of Pink Book (PB) or other sanction item number with the
+      name of the sanctioned work must be mentioned clearly on the drawing.
+      This links the GAD to the specific budget sanction.
+    reference: "PCE/HQ GAD Checklist — Section A, Item 5"
+    check_type: presence
+    param_required: [pb_sanction_reference_mentioned]
+    failure_message: >
+      Pink Book / sanction item number and sanctioned work name not
+      mentioned on drawing. Add reference in title block or notes section.
+
+  # ── Section B: NOTES ────────────────────────────────────────────────────────
+
+  - id: MB_CL_B1
+    category: DRAWING
+    severity: MINOR
+    title: "Dimensions not in mm or levels not in metres"
+    description: >
+      All dimensions must be in millimetres (mm) and all reduced levels
+      in metres (m). Font size must be reasonably large and clearly legible.
+      Mixing of units (some in cm, some in mm) is not acceptable.
+    reference: "PCE/HQ GAD Checklist — Section B, Item 1"
+    check_type: qualitative
+    param_required: [dimensions_in_mm_levels_in_m]
+    failure_message: >
+      Dimensions not consistently in mm or levels not in metres. Standardise:
+      all linear dimensions in mm, all RL values in metres to MSL. Font
+      size must be legible at working scale.
+
+  - id: MB_CL_B2
+    category: DRAWING
+    severity: MAJOR
+    title: "Colour convention for existing/proposed/dismantling works not stated"
+    description: >
+      The colour code for the three categories of work must be explicitly
+      stated in the legend/notes: Existing works = BLACK, Proposed = RED,
+      Dismantling = YELLOW (dotted). See also MB_D1 (existing in wrong colour).
+    reference: "PCE/HQ GAD Checklist — Section B, Item 2"
+    check_type: presence
+    param_required: [colour_convention_stated_in_legend]
+    failure_message: >
+      Colour convention not stated in legend/notes. Add legend:
+      "Existing works — BLACK; Proposed works — RED;
+      Dismantling — YELLOW DOTTED."
+
+  - id: MB_CL_B3
+    category: DRAWING
+    severity: MINOR
+    title: "North direction not shown on site plan"
+    description: >
+      North direction arrow must be shown on the site plan / key plan.
+      The note "do not scale — use written dimensions only" must also appear.
+    reference: "PCE/HQ GAD Checklist — Section B, Item 3"
+    check_type: presence
+    param_required: [north_direction_shown]
+    failure_message: >
+      North direction arrow not shown on site plan / key plan. Add north
+      arrow and note: "This drawing shall not be scaled. Only written
+      dimensions shall be followed."
+
+  - id: MB_CL_B4
+    category: DRAWING
+    severity: MINOR
+    title: "Plan/section/elevation not drawn to stated scale"
+    description: >
+      All views (plan, elevation, section) must be drawn to the stated
+      scale and the scale must be mentioned. Distorted or not-to-scale
+      views without a note are not acceptable.
+    reference: "PCE/HQ GAD Checklist — Section B, Item 4"
+    check_type: qualitative
+    param_required: [views_drawn_to_scale]
+    failure_message: >
+      Plan, elevation, or section views not drawn to stated scale. Ensure
+      all views are to scale (1:100 standard for GADs) and scale is stated
+      on each view or in the title block.
+
+  - id: MB_CL_B5
+    category: DRAWING
+    severity: CRITICAL
+    title: "Field engineer directions for site verification not mentioned"
+    description: >
+      Directions to field engineers before execution must be clearly stated
+      in notes, covering verification of: rail level, formation level, HFL,
+      max observed scour level on upstream, foundation level, bore log data,
+      type of soil, bearing capacity, apprehension of damage to nearby
+      structures. These ensure the drawing assumptions are validated at site
+      before work commences.
+    reference: "PCE/HQ GAD Checklist — Section B, Item 5"
+    check_type: presence
+    param_required: [field_engineer_directions_stated]
+    failure_message: >
+      Directions to field engineers for pre-execution site verification
+      not stated in notes. Add note directing Engineer-in-Charge to verify:
+      RL, FL, HFL, max observed scour level (upstream), foundation strata,
+      SBC, bore log data, and apprehension of damage to nearby structures
+      before commencing excavation.
+
+  - id: MB_CL_B6
+    category: DRAWING
+    severity: MINOR
+    title: "Co-ordination with other departments not mentioned"
+    description: >
+      Note directing the executive department to consult / intimate other
+      concerned departments (OHE/TRD, Signal, Telecom, Roads, Irrigation,
+      as applicable) must be included. For bridges involving OHE, Traffic,
+      or road crossings this is particularly important.
+    reference: "PCE/HQ GAD Checklist — Section B, Item 6"
+    check_type: presence
+    param_required: [inter_department_coordination_noted]
+    failure_message: >
+      Co-ordination with other departments not mentioned in notes. Add
+      note: "Executive department shall consult/intimate OHE/TRD, Signal,
+      Telecom and other concerned departments before and during execution."
+
+  - id: MB_CL_B8
+    category: DRAWING
+    severity: MAJOR
+    title: "Speed restriction provisions not mentioned"
+    description: >
+      Clear mention of speed restrictions to be followed before/during/
+      after execution must be in the notes or Modus Operandi. The specific
+      value (e.g., 30 kmph, 10 kmph) or reference to IRPWM provision must
+      be stated. Generic "as per IRPWM" alone is insufficient — the applicable
+      category of restriction must be specified.
+    reference: "PCE/HQ GAD Checklist — Section B, Item 8 / IRPWM 2019"
+    check_type: presence
+    param_required: [speed_restriction_provisions_stated]
+    failure_message: >
+      Speed restriction provisions not stated. Add in Work Execution
+      Arrangements or Modus Operandi: applicable speed restriction
+      category and kmph value before/during/after execution as per IRPWM.
+
+  - id: MB_CL_B9
+    category: DRAWING
+    severity: MINOR
+    title: "Reference drawings for detailing not mentioned"
+    description: >
+      All drawings referred to for detailing (RDSO standard drawings,
+      weep hole drawing, curtain/toe wall drawing, engineering indicator
+      drawing, L-section, ESP) must be cited by number. Partial citation
+      (e.g., only RDSO drawing but not weep hole drawing) is insufficient.
+    reference: "PCE/HQ GAD Checklist — Section B, Item 9"
+    check_type: presence
+    param_required: [all_reference_drawings_cited]
+    failure_message: >
+      One or more reference drawings not cited. Required references:
+      RDSO standard drawing for box type, weep hole drawing
+      GM(W)SC/BR/1453-90, curtain/drop/toe wall reference per PCE letter,
+      engineering indicator drawing GM(W)SC/BR/2570-2009, L-section
+      drawing, ESP drawing.
+
+  - id: MB_CL_B10
+    category: DRAWING
+    severity: MAJOR
+    title: "Miscellaneous details missing from notes"
+    description: >
+      The following miscellaneous items must be mentioned in the notes
+      (as applicable): skin reinforcement, no plastering/cement wash,
+      dry stone pitching spec, weep holes, backfill spec, inspection
+      platform/steps, pedestal, trolley refuges, OHE mast, safety measures,
+      service cables, launching scheme, protective coating to reinforcement
+      and concrete, station names with MSL, railway boundary, modus operandi.
+    reference: "PCE/HQ GAD Checklist — Section B, Item 10"
+    check_type: qualitative
+    param_required: [miscellaneous_notes_complete]
+    failure_message: >
+      One or more mandatory miscellaneous items missing from drawing notes.
+      Check and add as applicable: skin reinforcement, pitching spec,
+      weep holes, backfill, inspection steps, safety measures, station
+      names with MSL, railway boundary, modus operandi.
+
+  - id: MB_CL_B11
+    category: DRAWING
+    severity: MAJOR
+    title: "Codes and specifications not referenced in order of preference"
+    description: >
+      All applicable codes (IRS, IRC, IS) must be listed with their
+      edition/year and their order of preference. Latest editions must
+      be cited. Order of preference: IRS Bridge Rules > IRS CBC > IRS
+      Substructure Code > IRBM > IRUSS > IS codes.
+    reference: "PCE/HQ GAD Checklist — Section B, Item 11"
+    check_type: presence
+    param_required: [codes_specifications_listed]
+    failure_message: >
+      Codes and specifications not listed or listed without order of
+      preference. Include with edition years: IRS Concrete Bridge Code
+      2014 (Sep reprint), IRS Bridge Substructure Code 2013, IRS Bridge
+      Rules 2014, IR Bridge Manual 2024, IRUSS 2021 — in order of
+      preference with "latest ACS" noted.
+
+  - id: MB_CL_B12
+    category: DRAWING
+    severity: MAJOR
+    title: "Technical data table incomplete — key parameters missing"
+    description: >
+      Technical data must be in tabular form and must include ALL of:
+      latitude/longitude, track on single/double line, bridge on UP/DN line,
+      grade, rail level, formation level on approaches, HFL, LWL, bed level,
+      free board, vertical clearance, linear waterway, standard of loading,
+      type of superstructure, type of bearing, type of substructure, type
+      of foundation, design discharge, catchment area, seismic zone, wind
+      zone, sub-zone for waterway calculation, exposure condition, clear
+      cover, guard rails provision, track straight/curve, any RAT/RAW
+      within 50km upstream, cross slope, name of river/stream.
+      ALL RL values to be w.r.t. MSL.
+    reference: "PCE/HQ GAD Checklist — Section B, Item 12"
+    check_type: qualitative
+    param_required: [technical_data_table_complete]
+    failure_message: >
+      Technical data table incomplete. One or more of the following missing:
+      lat/long, track type, grade, RL/FL, HFL, LWL, BL, freeboard, VC,
+      LW, loading standard, superstructure/bearing/substructure/foundation
+      types, design discharge, catchment area, seismic/wind zone, sub-zone,
+      exposure condition, cover, guard rails, curve/straight, RAT/RAW
+      within 50km upstream, cross slope, river/stream name.
+
+  - id: MB_CL_B14
+    category: DRAWING
+    severity: MAJOR
+    title: "Trial pit / bore log details incomplete or not in tabular form"
+    description: >
+      Trial pit / bore log details must be in tabular form showing:
+      chainage, RL at top of trial pit/bore hole, complete depth-wise
+      strata description, and SBC value for each stratum. A sketch alone
+      without a table is insufficient. See also MB_C6 (trial pit details).
+    reference: "PCE/HQ GAD Checklist — Section B, Item 14"
+    check_type: qualitative
+    param_required: [bore_log_in_tabular_form]
+    failure_message: >
+      Trial pit/bore log details not in proper tabular form. Provide table
+      with: chainage, RL at top, depth-wise strata description at each
+      interval, and SBC value for each stratum. State depth of bore hole
+      and number of bore holes taken.
+
+  - id: MB_CL_B15
+    category: DRAWING
+    severity: MAJOR
+    title: "Alterations on drawing not signed and dated"
+    description: >
+      Any alteration made to the drawing after initial preparation must be
+      clearly indicated (clouded/marked) with the name, signature, and date
+      of the official authorising the change. Unsigned alterations invalidate
+      the drawing.
+    reference: "PCE/HQ GAD Checklist — Section B, Item 15"
+    check_type: qualitative
+    param_required: [alterations_signed_and_dated]
+    failure_message: >
+      Alteration on drawing not signed and dated. Mark the altered region
+      clearly (cloud marking), add name, designation, signature and date
+      of the official authorising the change.
+
+  # ── Section C: INSTRUCTIONS ──────────────────────────────────────────────────
+
+  - id: MB_CL_C1
+    category: DRAWING
+    severity: CRITICAL
+    title: "Proposed work deviates from sanction — deviation not documented"
+    description: >
+      If the proposed bridge scheme deviates from the sanctioned scope
+      (Pink Book/other sanction), the deviation must be documented on the
+      drawing with reasons and approval reference. Undocumented deviations
+      make the GAD non-compliant with the sanctioned estimate.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 1"
+    check_type: qualitative
+    param_required: [deviation_from_sanction_documented]
+    failure_message: >
+      Proposed work appears to deviate from sanction but deviation is
+      not documented on drawing. State whether work is as per sanction
+      or deviation; if deviation, provide details and approval reference.
+
+  - id: MB_CL_C2
+    category: DRAWING
+    severity: CRITICAL
+    title: "GAD does not satisfy latest Schedule of Dimensions (SOD)"
+    description: >
+      All dimensions, clearances, and structural arrangements on the GAD
+      must satisfy the latest approved Schedule of Dimensions (IRSOD).
+      Particularly: horizontal clearances from track to structure, kinematic
+      envelope, platform positions, track centres.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 2 / IRSOD"
+    check_type: qualitative
+    param_required: [gad_satisfies_sod]
+    failure_message: >
+      GAD may not satisfy the latest IRSOD. Verify all clearances against
+      current Schedule of Dimensions — particularly track-to-structure
+      horizontal clearance, kinematic envelope, and track centres.
+
+  - id: MB_CL_C3
+    category: DRAWING
+    severity: MAJOR
+    title: "Latest IRS/IRC codes not followed or order of preference not stated"
+    description: >
+      Only the latest editions of IRS and IRC codes must be referenced.
+      Their order of preference for design must be stated. Old editions
+      (e.g., IRBM 1998 instead of 2024) are not acceptable.
+      See also MJ_D8 for the IRBM edition check.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 3"
+    check_type: qualitative
+    param_required: [latest_code_editions_used]
+    failure_message: >
+      Latest editions of codes not used or order of preference not stated.
+      Update all code references to current editions with latest A&C slips.
+
+  - id: MB_CL_C4
+    category: DRAWING
+    severity: MAJOR
+    title: "L-section not approved by open line — GAD bridge details not verified from L-section"
+    description: >
+      L-section must be approved by the open line (ADEN/DEN) before
+      the GAD is finalised. Bridge details (RL, FL, grade, chainage) must
+      be verified from the approved L-section. A copy of the approved
+      L-section must be submitted with the GAD for HQ approval.
+      Reference: Board's letter 98/W-1/General/O/30 dated 10.06.2008.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 4"
+    check_type: qualitative
+    param_required: [l_section_approved_and_verified]
+    failure_message: >
+      L-section not approved by open line or bridge details not verified
+      from approved L-section. Submit copy of approved L-section with GAD.
+      If L-section approval is pending, state reasons and submit provisional
+      levels with a note that final levels will be verified from approved L-section.
+
+  - id: MB_CL_C5
+    category: HYDRAULIC
+    severity: CRITICAL
+    title: "Hydrological investigation report not submitted"
+    description: >
+      Hydrological investigation must be carried out and a report submitted
+      with the GAD package. Without a hydrological investigation, the design
+      discharge and waterway calculations have no validated basis.
+      Reference: Clause 4.1 of Appendix-I of IRS Substructure Code.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 5 / IRS Substructure Code Cl.4.1"
+    check_type: presence
+    param_required: [hydrological_investigation_done]
+    failure_message: >
+      Hydrological investigation report not submitted with GAD. Carry out
+      and submit report as per Clause 4.1 of Appendix-I of IRS Bridge
+      Substructure Code. If not done, state reasons and basis on which
+      design discharge has been computed.
+
+  - id: MB_CL_C6a
+    category: SUPERSTRUCTURE
+    severity: MAJOR
+    title: "RDSO standard drawing not followed or dimensions not as per RDSO"
+    description: >
+      For RCC box / standard span superstructures, RDSO standard drawing
+      must be followed. All dimensions on the GAD must match the applicable
+      RDSO standard drawing exactly. Any deviation requires PCE/CAO approval
+      with proper justification.
+      Reference: Board's letter No.2013/CIII/BR/RDSO/Misc. dated 11.08.2014.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 6(i)"
+    check_type: qualitative
+    param_required: [rdso_standard_drawing_followed]
+    failure_message: >
+      RDSO standard drawing not followed or dimensions do not match RDSO
+      standard. Cite RDSO drawing number and verify all critical dimensions
+      against it. Any deviation requires PCE/CAO approval with justification.
+
+  - id: MB_CL_C8
+    category: HYDRAULIC
+    severity: CRITICAL
+    title: "Design discharge not calculated per code / RAT/RAW upstream not considered"
+    description: >
+      Design discharge must be calculated per Clause 4.2 of IRS Substructure
+      Code using the applicable method (Dicken's, Ryve's, rational, CWC).
+      Where a RAT (Reservoir Across Track) or RAW (Reservoir Across Waterway)
+      exists within 50km upstream, the dam break / sudden release discharge
+      must also be considered and added.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 8 / IRS Substructure Code Cl.4.2"
+    check_type: qualitative
+    param_required: [design_discharge_calculated_per_code]
+    failure_message: >
+      Design discharge calculation method not stated or not per IRS
+      Substructure Code Cl.4.2. State the formula/method used, catchment
+      area, and computed discharge. Check for RAT/RAW within 50km upstream
+      — if present, add dam break discharge as required.
+
+  - id: MB_CL_C9
+    category: HYDRAULIC
+    severity: CRITICAL
+    title: "Freeboard and VC not provided per IRS Substructure Code"
+    description: >
+      Freeboard per Clause 4.8 and VC per Clause 4.9 of IRS Bridge
+      Substructure Code must be checked and confirmed. For RCC boxes,
+      VC is not required but freeboard (FL-HFL >= 1.000m or existing
+      FB whichever is less) must be verified. For open spans, VC must
+      be computed from the discharge-based table (IRS Bridge Rules).
+      See also MB_H3 (freeboard rule) and the discharge-based VC calculator.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 9 / IRS Substructure Code Cl.4.8 & 4.9"
+    check_type: qualitative
+    param_required: [freeboard_and_vc_per_code_confirmed]
+    failure_message: >
+      Freeboard and/or VC not verified against IRS Substructure Code Cl.4.8
+      (freeboard) and Cl.4.9 (VC). For RCC box: confirm FB >= 1.000m or
+      existing FB. For open spans: compute VC from discharge table and
+      verify VC provided >= VC required.
+
+  - id: MB_CL_C10
+    category: HYDRAULIC
+    severity: CRITICAL
+    title: "Proposed waterway not per code requirement"
+    description: >
+      Proposed waterway area must satisfy Clause 4.5 of IRS Substructure
+      Code. Required area = Q / V (where V is the design velocity, taken
+      as the lesser of Lacey's regime velocity or limiting velocity for
+      the channel boundary). The calculation must be shown.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 10 / IRS Substructure Code Cl.4.5"
+    check_type: qualitative
+    param_required: [waterway_calculation_per_code_shown]
+    failure_message: >
+      Waterway calculation not shown or proposed waterway does not meet
+      Clause 4.5 of IRS Substructure Code. Show: Q, V (Lacey/limiting),
+      required area = Q/V, and confirm proposed area >= required area.
+
+  - id: MB_CL_C13i
+    category: FOUNDATION
+    severity: CRITICAL
+    title: "SBC not calculated by a suitable method — only stated without basis"
+    description: >
+      SBC must be calculated by a suitable method per Clause 6.3.1 of IRS
+      Bridge Substructure Code (SPT-based per IS 8009 / Terzaghi / plate
+      load test) with settlement analysis. Simply stating "SBC = X t/m²
+      from soil test report" without the calculation methodology is
+      insufficient. Settlement analysis calculations must be complete.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 13(i) / IRS Substructure Code Cl.6.3.1"
+    check_type: qualitative
+    param_required: [sbc_calculated_by_suitable_method]
+    failure_message: >
+      SBC not calculated by a stated suitable method. Per Clause 6.3.1 of
+      IRS Substructure Code, SBC must be derived from SPT values per
+      IS 8009 / Terzaghi analysis / plate load test, with complete
+      settlement analysis. Incomplete Annexure calculations in soil report
+      are not acceptable.
+
+  - id: MB_CL_C14
+    category: DRAWING
+    severity: MAJOR
+    title: "GAD not prepared with half plan at top, half plan at bottom, L-section and elevation"
+    description: >
+      GAD must be prepared with: half plan at top of barrel (track level),
+      half plan at bottom (foundation level), longitudinal section (L-section),
+      sectional elevation and key/site plan. Any missing view must be
+      justified.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 14"
+    check_type: qualitative
+    param_required: [gad_has_all_required_views]
+    failure_message: >
+      GAD is missing one or more required views. Must include: half plan
+      at top (at track level), half plan at bottom (at foundation level),
+      longitudinal section, sectional elevation, and key/site plan.
+
+  - id: MB_CL_C15
+    category: DRAWING
+    severity: MAJOR
+    title: "Dimensions in plan, elevation, and cross-section do not match"
+    description: >
+      All common dimensions shown in plan, elevation, and cross-section
+      must be identical. Discrepancy in a dimension between views indicates
+      a drafting error or design inconsistency that must be resolved.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 15"
+    check_type: qualitative
+    param_required: [dimensions_consistent_across_views]
+    failure_message: >
+      Dimensions in plan, elevation, and/or cross-section do not match.
+      Identify and reconcile all discrepancies. A dimension must be the
+      same in every view where it appears.
+
+  - id: MB_CL_C16
+    category: FOUNDATION
+    severity: MAJOR
+    title: "Backfill material specification not shown"
+    description: >
+      Backfill material behind abutments, wing walls, and RCC boxes must
+      be shown on drawing with specification per Clause 7.5 of IRS
+      Substructure Code (GW, GP, SW — well-graded granular material,
+      free from organic matter, compacted to 100% MDD).
+    reference: "PCE/HQ GAD Checklist — Section C, Item 16 / IRS Substructure Code Cl.7.5"
+    check_type: presence
+    param_required: [backfill_material_specified]
+    failure_message: >
+      Backfill material behind abutments/wing walls/RCC box not specified.
+      Add note: "Backfill material shall be as per Clause 7.5 of IRS
+      Bridge Substructure Code 2013 — well-graded granular material
+      (GW/GP/SW) compacted to 100% MDD."
+
+  - id: MB_CL_C17
+    category: DRAWING
+    severity: MAJOR
+    title: "Weep holes not provided adequately"
+    description: >
+      Weep holes per Clause 7.6 of IRS Substructure Code must be provided
+      in all earth-retaining structures (abutments, wing walls, return walls).
+      Spacing, diameter, and filter media must be shown. See also MB_D11.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 17 / IRS Substructure Code Cl.7.6"
+    check_type: presence
+    param_required: [weep_holes_provided_adequately]
+    failure_message: >
+      Weep holes not provided adequately per Clause 7.6 of IRS Substructure
+      Code. Provide 75/100mm dia PVC pipe weep holes at 1000mm c/c
+      (staggered) with graded gravel filter in all retaining structures.
+
+  - id: MB_CL_C18
+    category: DRAWING
+    severity: MAJOR
+    title: "Flooring details with curtain/drop wall/apron not shown"
+    description: >
+      For box bridges: flooring cross-section must be shown with curtain
+      wall, drop wall, and apron as applicable. Dimensions, concrete grade,
+      and reference to standard detail must be cited.
+      Reference: SP:13 / IRC code / IRBM Ch.VIII.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 18 / SP:13"
+    check_type: presence
+    param_required: [flooring_with_protection_details_shown]
+    failure_message: >
+      Flooring details with curtain wall/drop wall/apron not shown.
+      Provide cross-section of flooring with all protection elements
+      (drop wall, curtain wall, toe wall, apron) with dimensions and
+      concrete grades.
+
+  - id: MB_CL_C20
+    category: DRAWING
+    severity: MAJOR
+    title: "Wing walls without cross-section or not shown with dotted lines in elevation"
+    description: >
+      Wing walls must be shown in cross-section with dimensions. In the
+      elevation view, the submerged/below-grade portion of wing walls
+      must be shown in dotted lines. If a standard drawing is referenced
+      for wing walls, the drawing number must be cited.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 20"
+    check_type: presence
+    param_required: [wing_walls_shown_with_cross_section]
+    failure_message: >
+      Wing wall cross-section not shown, or wing wall below-grade portion
+      not shown in dotted lines in elevation. Add wing wall cross-section
+      with dimensions and material specification.
+
+  - id: MB_CL_C21
+    category: DRAWING
+    severity: MINOR
+    title: "Inspection facilities (ladder/steps/platform) not provided"
+    description: >
+      Inspection ladder, steps, and inspection platform must be provided
+      at the bridge to allow periodic inspection of the structure. Details
+      or reference to standard drawing must be shown.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 21"
+    check_type: presence
+    param_required: [inspection_facilities_shown]
+    failure_message: >
+      Inspection facilities (ladder/steps/platform) not shown. Provide
+      inspection steps at both approaches with dimensions per standard
+      detail. For major bridges, provide inspection platform at pier caps.
+
+  - id: MB_CL_C23
+    category: DRAWING
+    severity: MINOR
+    title: "Reference to separate drawings for pitching/protection works not mentioned"
+    description: >
+      Where detailed pitching, protection work, or training work drawings
+      are maintained separately, the reference to those drawings must be
+      mentioned on the GAD at the appropriate location.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 23"
+    check_type: qualitative
+    param_required: [separate_protection_drawings_referenced]
+    failure_message: >
+      Reference to separate drawings for pitching/protection works not
+      mentioned on GAD. Add reference at pitching indication on drawing.
+
+  - id: MB_CL_C24
+    category: DRAWING
+    severity: MAJOR
+    title: "Direction of flow not confirmed from site or not shown correctly"
+    description: >
+      Direction of flow must be confirmed from site inspection and shown
+      correctly with an arrow on the plan. See also MB_D4 for flow direction
+      vs completion drawing check. Incorrect flow direction affects U/S vs
+      D/S designation and scour computation.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 24"
+    check_type: qualitative
+    param_required: [flow_direction_confirmed_and_shown]
+    failure_message: >
+      Direction of flow not confirmed from site or not correctly shown.
+      Conduct site inspection to confirm flow direction, mark with arrow
+      on plan view, and verify against existing bridge completion drawing.

@@ -1,0 +1,860 @@
+# ============================================================
+# RULE SET 2: MAJOR BRIDGES
+# PSC Girder, RCC T-Beam, Steel Spans — Span 6m to 30m
+# ============================================================
+# Source: Br.No.28 (Godavari, PSC 15x18.3m), Br.No.475 (MBNR-Dhone)
+#   South Central Railway — Nanded / HYB Division
+#   Reviewed by SSE/Drawing & Design Branch
+#
+# NEVER DELETE RULES. ADD PROGRESSIVELY ONLY.
+# Last updated: 2025-06-11 | GADs reviewed: 2
+# ============================================================
+
+rules:
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION A — HYDRAULIC CHECKS (Major Bridges)
+  # ══════════════════════════════════════════════════════════
+
+  - id: MJ_H1
+    category: HYDRAULIC
+    severity: CRITICAL
+    title: "Proposed waterway area less than required"
+    description: >
+      Proposed waterway area (up to HFL or standard FB) must be >=
+      Required waterway area as per Lacey's formula or hydraulic study.
+      For multi-span bridges, total waterway area across all spans is used.
+    reference: "IRS Bridge Rules 2014, Cl.5.2"
+    check_type: numeric_comparison
+    param_required: [proposed_waterway_area_m2, required_waterway_area_m2]
+    condition: "proposed_waterway_area_m2 >= required_waterway_area_m2"
+    failure_message: >
+      Proposed waterway area ({proposed_waterway_area_m2} m²) < Required
+      ({required_waterway_area_m2} m²). Span arrangement must be revised.
+
+  - id: MJ_H2
+    category: HYDRAULIC
+    severity: CRITICAL
+    title: "Proposed linear waterway less than existing"
+    description: >
+      For doubling/replacement bridges, proposed linear waterway must be
+      >= existing linear waterway. Reduction requires specific hydraulic
+      approval from competent authority.
+    reference: "IRS Bridge Rules 2014, Cl.5.2"
+    check_type: numeric_comparison
+    param_required: [proposed_linear_waterway_m, existing_linear_waterway_m]
+    condition: "proposed_linear_waterway_m >= existing_linear_waterway_m"
+    failure_message: >
+      Proposed LW ({proposed_linear_waterway_m} m) < Existing LW
+      ({existing_linear_waterway_m} m). Hydraulic justification required.
+
+  - id: MJ_H3
+    category: HYDRAULIC
+    severity: CRITICAL
+    title: "Vertical clearance below 1200mm for navigable river"
+    description: >
+      For navigable rivers: VC >= 1200mm from HFL to soffit of girder (BOG).
+      For non-navigable rivers: VC >= 600mm.
+      For multi-span bridges, VC must be checked at EACH span individually
+      — a common VC figure is not acceptable where spans vary.
+    reference: "IRS Bridge Rules 2014, Cl.5.5"
+    check_type: numeric_comparison
+    param_required: [vertical_clearance_provided_mm, navigable]
+    condition: >
+      (navigable == true and vertical_clearance_provided_mm >= 1200) or
+      (navigable == false and vertical_clearance_provided_mm >= 600)
+    failure_message: >
+      Vertical clearance ({vertical_clearance_provided_mm} mm) below
+      minimum. Formation level must be raised or span depth reconsidered.
+
+  - id: MJ_H4
+    category: HYDRAULIC
+    severity: MAJOR
+    title: "Freeboard less than 1.000m above HFL"
+    description: >
+      Minimum freeboard = 1.000m from HFL to formation level (FL).
+      Where GAD shows FB deficient but WWC shows adequate due to datum
+      offset, GAD must be corrected to adopt OHFL from WWC with note.
+    reference: "IRS Bridge Rules 2014, Cl.5.5"
+    check_type: numeric_comparison
+    param_required: [hfl_m, formation_level_m]
+    condition: "(formation_level_m - hfl_m) >= 1.0"
+    failure_message: >
+      Freeboard = {formation_level_m} - {hfl_m} = {freeboard} m < 1.000m.
+      Raise formation level or adopt OHFL from waterway calculations with
+      datum reconciliation note.
+
+  - id: MJ_H5
+    category: HYDRAULIC
+    severity: MAJOR
+    title: "Individual scour levels not computed for all piers"
+    description: >
+      Scour level must be computed INDIVIDUALLY for each pier and
+      abutment — not a single common value. Each pier has different
+      hydraulic conditions depending on its position in the waterway.
+    reference: "IRS Bridge Rules 2014, Cl.5.14 / IS 3955"
+    check_type: qualitative
+    param_required: [scour_levels_individual]
+    failure_message: >
+      Individual scour levels not computed for all piers and abutments.
+      Compute scour level for each substructure unit separately per
+      IS 3955 and tabulate on drawing.
+
+  - id: MJ_H6
+    category: HYDRAULIC
+    severity: CRITICAL
+    title: "Foundation level not below computed scour level"
+    description: >
+      Foundation level must be verified against computed maximum scour
+      level for each pier/abutment with adequate embedment below scour.
+    reference: "IRS Bridge Substructure Code 2013"
+    check_type: qualitative
+    param_required: [foundation_level_vs_scour_checked]
+    failure_message: >
+      Foundation levels not verified against scour levels. Confirm
+      adequate embedment below maximum scour for each substructure unit.
+
+  - id: MJ_H7
+    category: HYDRAULIC
+    severity: CRITICAL
+    title: "HFL on GAD differs from OHFL in waterway calculations"
+    description: >
+      HFL used on GAD must match OHFL from waterway calculations.
+      Where absolute levels differ due to datum offset, height differences
+      (freeboard, VC) must still agree. Reconciliation note mandatory.
+    reference: "IRS Bridge Rules 2014, Cl.5.5 / Cross-document consistency"
+    check_type: qualitative
+    param_required: [hfl_gad_matches_ohfl_wwc]
+    failure_message: >
+      HFL on GAD differs from OHFL in waterway calculations. After datum
+      correction, freeboard values still differ. Adopt OHFL from waterway
+      calculations and add datum reconciliation note.
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION B — SUPERSTRUCTURE CHECKS (Major Bridges)
+  # ══════════════════════════════════════════════════════════
+
+  - id: MJ_S1
+    category: SUPERSTRUCTURE
+    severity: MAJOR
+    title: "PSC girder RDSO reference drawing not cited"
+    description: >
+      PSC girder must conform to RDSO standard drawing (B-10273 series
+      for 18.3m span). Reference drawing number must be cited on GAD.
+    reference: "RDSO Standard Drawing B-10273 series"
+    check_type: presence
+    param_required: [psc_girder_rdso_reference]
+    failure_message: >
+      RDSO reference drawing for PSC girder not cited. State applicable
+      drawing from B-10273 series on GAD.
+
+  - id: MJ_S2
+    category: SUPERSTRUCTURE
+    severity: MAJOR
+    title: "Bearing type not confirmed as POT-PTFE for spans >= 12.2m"
+    description: >
+      For spans >= 12.2m on 25T/2008 loading, POT-PTFE bearings are
+      mandatory. Elastomeric bearings NOT permitted. Open comment on
+      bearing type must be resolved before issue.
+    reference: "IRS Bridge Rules 2014"
+    check_type: presence
+    param_required: [bearing_type_confirmed]
+    failure_message: >
+      Bearing type not confirmed as POT-PTFE. For 18.3m span on 25T/2008
+      loading only POT-PTFE bearings are permitted. Resolve open comment.
+
+  - id: MJ_S3
+    category: SUPERSTRUCTURE
+    severity: MINOR
+    title: "Bearing reference drawing not cited"
+    description: >
+      Reference drawing for bearing assembly must be cited on GAD.
+    reference: "RDSO/B-10273/4"
+    check_type: presence
+    param_required: [bearing_reference_drawing]
+    failure_message: >
+      Bearing reference drawing not cited. Include RDSO/B-10273/4 or
+      applicable bearing drawing reference.
+
+  - id: MJ_S4
+    category: SUPERSTRUCTURE
+    severity: MINOR
+    title: "Wearing coat thickness and cross-fall slope not annotated"
+    description: >
+      Wearing coat: 80mm at centre, 20mm at ends (min). Cross-fall for
+      drainage must be annotated with slope percentage and direction.
+    reference: "Standard GAD requirement"
+    check_type: qualitative
+    param_required: [wearing_coat_annotated]
+    failure_message: >
+      Wearing coat thickness and cross-fall not annotated. Specify:
+      80mm centre, 20mm ends (min), cross-fall direction and percentage.
+
+  - id: MJ_S5
+    category: SUPERSTRUCTURE
+    severity: MAJOR
+    title: "Transition slab / approach slab details absent"
+    description: >
+      Approach slab minimum 20m length with backfill specification
+      (GW/GP/SW compacted to 100% MDD per IS 2720) must be shown.
+    reference: "IRS Bridge Substructure Code 2013, Cl.7.5"
+    check_type: presence
+    param_required: [transition_slab_shown]
+    failure_message: >
+      Transition slab details not shown. Provide: min 20m length,
+      reinforced, with backfill specification (GW/GP/SW, 100% MDD).
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION C — FOUNDATION CHECKS (Major Bridges)
+  # ══════════════════════════════════════════════════════════
+
+  - id: MJ_F1
+    category: FOUNDATION
+    severity: CRITICAL
+    title: "Foundation design tentative at tender/approval stage"
+    description: >
+      Foundation type and dimensions must be finalised based on approved
+      structural design before GAD is issued for tender. 'Tentative' or
+      'as per design' notes are not acceptable.
+    reference: "GAD standard note requirement"
+    check_type: qualitative
+    param_required: [foundation_design_finalised]
+    failure_message: >
+      Foundation design is marked tentative. Finalise foundation details
+      based on approved structural design before issue.
+
+  - id: MJ_F2
+    category: FOUNDATION
+    severity: MAJOR
+    title: "Pile/pile cap concrete not M-35 with 20mm aggregate"
+    description: >
+      RCC piles, pile caps, and bed blocks: M-35 with 20mm aggregate.
+    reference: "IRS CBC 2014"
+    check_type: qualitative
+    param_required: [pile_concrete_grade]
+    failure_message: >
+      Pile/pile cap concrete must be M-35 with 20mm aggregate per IRS CBC 2014.
+
+  - id: MJ_F3
+    category: FOUNDATION
+    severity: MAJOR
+    title: "Pile load test requirement not mentioned"
+    description: >
+      Pile load test per IS 2911 Part 4 is mandatory and must be noted.
+    reference: "IS 2911 Part 4 : 1985"
+    check_type: presence
+    param_required: [pile_load_test_noted]
+    failure_message: >
+      Pile load test requirement not noted. Add: "Pile load test shall
+      be conducted as per IS 2911 Part 4 before commencing production piling."
+
+  - id: MJ_F4
+    category: FOUNDATION
+    severity: MAJOR
+    title: "Pile integrity test not mentioned"
+    description: >
+      Pile integrity test mandatory for 100% of piles. Must be noted on drawing.
+    reference: "IR Bridge practice"
+    check_type: presence
+    param_required: [pile_integrity_test_noted]
+    failure_message: >
+      Add note: "Pile integrity test shall be conducted for 100% of piles."
+
+  - id: MJ_F5
+    category: FOUNDATION
+    severity: MAJOR
+    title: "Bed block dimensions not tabulated"
+    description: >
+      Foundation bed block dimensions must be tabulated and cross-referenced
+      to approved structural design.
+    reference: "Standard GAD requirement"
+    check_type: presence
+    param_required: [bed_block_dimensions_shown]
+    failure_message: >
+      Bed block dimensions not tabulated. Provide table with L×B×D for
+      each pier and abutment with structural design reference.
+
+  - id: MJ_F6
+    category: FOUNDATION
+    severity: CRITICAL
+    title: "Foundation pressure exceeds SBC stated on drawing"
+    description: >
+      Max foundation pressure must be < SBC at actual foundation level.
+      Cannot be deferred to Engineer-in-Charge.
+    reference: "IRS Bridge Substructure Code 2013, Cl.4.4"
+    check_type: qualitative
+    param_required: [foundation_pressure_within_sbc]
+    failure_message: >
+      Foundation pressure exceeds SBC. Increase foundation depth or
+      revise span arrangement to reduce bearing pressure.
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION D — MATERIAL CHECKS (Major Bridges)
+  # ══════════════════════════════════════════════════════════
+
+  - id: MJ_M1
+    category: MATERIAL
+    severity: MAJOR
+    title: "Substructure concrete specification incorrect"
+    description: >
+      Mass concrete substructure: M-35 with 40mm aggregate.
+      RCC elements (pile, pile cap, bed block): M-35 with 20mm aggregate.
+    reference: "IRS CBC 2014"
+    check_type: qualitative
+    param_required: [substructure_concrete_spec_correct]
+    failure_message: >
+      Mass concrete substructure: M-35, 40mm agg. RCC pile/cap/bed
+      block: M-35, 20mm agg. Verify and correct specifications.
+
+  - id: MJ_M2
+    category: MATERIAL
+    severity: MAJOR
+    title: "Reinforcement grade not HYSD Fe-500 per IS 1786"
+    description: >
+      All reinforcement must be HYSD Fe-500 as per IS 1786-2008.
+    reference: "IS 1786-2008"
+    check_type: qualitative
+    param_required: [reinforcement_grade_correct]
+    failure_message: >
+      Reinforcement must be HYSD Fe-500 per IS 1786-2008.
+      Update specification notes.
+
+  - id: MJ_M3
+    category: MATERIAL
+    severity: MAJOR
+    title: "Exposure condition and cover requirements not stated"
+    description: >
+      Exposure condition must be stated with cover requirements.
+      Severe: 45mm substructure, 40mm superstructure per IRS CBC 2014.
+    reference: "IRS CBC 2014"
+    check_type: presence
+    param_required: [exposure_condition_stated]
+    failure_message: >
+      State exposure condition and corresponding concrete covers per
+      IRS CBC 2014 Table 12.
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION E — PROTECTION WORKS (Major Bridges)
+  # ══════════════════════════════════════════════════════════
+
+  - id: MJ_P1
+    category: PROTECTION
+    severity: CRITICAL
+    title: "Pitching not shown with nomenclature, extent and levels"
+    description: >
+      River bed and slope pitching must be shown with nomenclature,
+      top/bottom levels, horizontal extent, and specification note.
+    reference: "IRBM 2024 Para 818 / IRS Bridge Rules Cl.5.12"
+    check_type: presence
+    param_required: [pitching_shown_complete]
+    failure_message: >
+      Pitching details incomplete. Show extent, levels, and specification:
+      300mm boulders (35-40 kg) over 300mm stone chips over 300mm
+      sand-gravel with toe wall per IRBM 2024 Para 818.
+
+  - id: MJ_P2
+    category: PROTECTION
+    severity: MAJOR
+    title: "Drainage between existing and proposed bridge not shown"
+    description: >
+      Drainage arrangement between existing and proposed parallel bridges
+      must be detailed with cross-section, invert levels, and outlet.
+    reference: "IRBM 2024"
+    check_type: qualitative
+    param_required: [inter_bridge_drainage_shown]
+    failure_message: >
+      Drainage between existing and proposed bridge not detailed. Provide
+      drainage cross-section with flow direction and outlet details.
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION F — OHE / TRACK (Major Bridges)
+  # ══════════════════════════════════════════════════════════
+
+  - id: MJ_O1
+    category: OHE_TRACK
+    severity: MAJOR
+    title: "OHE mast pedestal dimensions not shown"
+    description: >
+      OHE mast pedestal dimensions must be shown per RDSO BS-121 Oct 2015.
+    reference: "RDSO BS-121 Oct 2015"
+    check_type: presence
+    param_required: [ohe_pedestal_shown]
+    failure_message: >
+      Add OHE mast pedestal details per RDSO BS-121 (Oct 2015) and
+      coordinate with TRD for mast type.
+
+  - id: MJ_O2
+    category: OHE_TRACK
+    severity: MINOR
+    title: "Track centre distance not dimensioned on plan/section"
+    description: >
+      Track c/c must be dimensioned on both plan and cross-section.
+      Minimum 5300mm per IRPWM 2019.
+    reference: "IRPWM 2019"
+    check_type: presence
+    param_required: [track_centre_dimensioned]
+    failure_message: >
+      Track c/c not dimensioned. Minimum 5300mm per IRPWM 2019.
+
+  - id: MJ_O3
+    category: OHE_TRACK
+    severity: NOTE
+    title: "CRS permission reminder for girder launching not noted"
+    description: >
+      Note that CRS sanction is required before launching girders on
+      running line must be included.
+    reference: "IRPWM 2019, Para 1302"
+    check_type: presence
+    param_required: [crs_permission_note]
+    failure_message: >
+      Add note: "CRS sanction shall be obtained before launching girders
+      as per IRPWM 2019 Para 1302."
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION G — DRAWING COMPLETENESS (Major Bridges)
+  # ══════════════════════════════════════════════════════════
+
+  - id: MJ_D1
+    category: DRAWING
+    severity: MINOR
+    title: "Drawing number incomplete"
+    description: >
+      Drawing number must be complete — no blanks or dashes in title block.
+    reference: "IR Drawing office practice"
+    check_type: presence
+    param_required: [drawing_number_complete]
+    failure_message: >
+      Complete the drawing number in title block before issue.
+
+  - id: MJ_D2
+    category: DRAWING
+    severity: CRITICAL
+    title: "Open drafting comments unresolved"
+    description: >
+      All open comments, query marks, and unresolved notes must be
+      cleared before final issue.
+    reference: "IR Drawing office practice"
+    check_type: qualitative
+    param_required: [open_comments_resolved]
+    failure_message: >
+      Open drafting comments found. Clear all query marks and unresolved
+      notes before issue.
+
+  - id: MJ_D3
+    category: DRAWING
+    severity: MINOR
+    title: "L-section and ESP reference drawings not cited"
+    description: >
+      Reference drawing numbers for L-section and ESP must be cited.
+    reference: "Standard GAD practice"
+    check_type: presence
+    param_required: [l_section_esp_referenced]
+    failure_message: >
+      Add L-section and ESP reference drawing numbers to the drawing.
+
+  - id: MJ_D4
+    category: DRAWING
+    severity: NOTE
+    title: "Completion drawing obligation not stated"
+    description: >
+      Obligation to submit As-Built drawings per IRWM Para 911 must be noted.
+    reference: "IRWM Para 911"
+    check_type: presence
+    param_required: [completion_drawing_note]
+    failure_message: >
+      Add note: "Contractor shall submit As-Built drawings within 3 months
+      of completion as per IRWM Para 911."
+
+  - id: MJ_D5
+    category: DRAWING
+    severity: NOTE
+    title: "Soundness certificate of existing bridge not referenced"
+    description: >
+      For doubling proposals, soundness certificate of existing bridge
+      for 25T/2008 loading must be referenced.
+    reference: "IR practice for doubling projects"
+    check_type: presence
+    param_required: [soundness_certificate_noted]
+    failure_message: >
+      Reference soundness certificate of existing bridge for 25T/2008 loading.
+
+  - id: MJ_D6
+    category: DRAWING
+    severity: NOTE
+    title: "Benchmark datum source not stated on GAD"
+    description: >
+      BM number, location, and RL value used for all levels must be stated.
+      Prevents datum confusion when cross-checking with WWC and soil report.
+    reference: "IR Survey and drawing practice"
+    check_type: presence
+    param_required: [benchmark_datum_stated_on_gad]
+    failure_message: >
+      State benchmark datum (BM No., location, RL value) in general notes
+      or title block.
+
+  - id: MJ_D7
+    category: DRAWING
+    severity: MAJOR
+    title: "Substructure structural design not approved — only GAD approved"
+    description: >
+      HQ/PCE approval is only for General Arrangement. Structural design
+      for substructure must be separately approved by competent authority.
+    reference: "IR HQ approval convention"
+    check_type: qualitative
+    param_required: [substructure_design_approval_status_noted]
+    failure_message: >
+      Structural design for abutments/wing walls/pile cap must be approved
+      for 25T/2008 loading by competent authority. Note status on drawing.
+
+  - id: MJ_D8
+    category: DRAWING
+    severity: MAJOR
+    title: "IRBM 2024 not referenced — outdated 1998 edition cited"
+    description: >
+      Current applicable Bridge Manual is IRBM 2024. Reference to 1998
+      edition must be updated.
+    reference: "IRBM 2024"
+    check_type: qualitative
+    param_required: [irbm_edition_current]
+    failure_message: >
+      Update codes list from IR Bridge Manual 1998 to IRBM 2024 with
+      latest A&C slips.
+
+  # ══════════════════════════════════════════════════════════
+  # SECTION H — PCE/HQ OFFICIAL CHECKLIST RULES (Major Bridges)
+  # Source: Official GAD Checklist — GNH-YARD-BR.NO.295-3
+  # Added: 2025-06-11
+  # ══════════════════════════════════════════════════════════
+
+  - id: MJ_CL_A1
+    category: DRAWING
+    severity: MAJOR
+    title: "Name of work not correctly/completely mentioned"
+    description: >
+      Name of work must include: Railway name, Division, Project, work
+      description with location, and name of consultant/EPC agency.
+    reference: "PCE/HQ GAD Checklist — Section A, Item 1"
+    check_type: presence
+    param_required: [name_of_work_complete]
+    failure_message: >
+      Name of work incomplete. Must include Railway, Division, Project,
+      chainage/location, EPC agency and consultant names.
+
+  - id: MJ_CL_A4
+    category: DRAWING
+    severity: CRITICAL
+    title: "Name and signature of all involved officials not present"
+    description: >
+      Names and signatures of drafter, checker, divisional officers, and
+      provision for HQ officials must all be present with dates.
+    reference: "PCE/HQ GAD Checklist — Section A, Item 4"
+    check_type: qualitative
+    param_required: [all_official_signatures_present]
+    failure_message: >
+      Names/signatures of all officials not present. Required: drafter,
+      checker, DyCE/AEN/SSE (Division), CBE/DyCE/Design (HQ), with dates.
+
+  - id: MJ_CL_A5
+    category: DRAWING
+    severity: MAJOR
+    title: "PB/sanction item reference not mentioned"
+    description: >
+      Pink Book or other sanction item number and sanctioned work name
+      must be on the drawing to link it to the budget sanction.
+    reference: "PCE/HQ GAD Checklist — Section A, Item 5"
+    check_type: presence
+    param_required: [pb_sanction_reference_mentioned]
+    failure_message: >
+      Pink Book/sanction item reference not mentioned. Add PB item number
+      and sanctioned work name in title block or notes.
+
+  - id: MJ_CL_B3
+    category: DRAWING
+    severity: MINOR
+    title: "North direction not shown on site plan"
+    description: >
+      North direction arrow must be on site/key plan. "Do not scale"
+      note must also appear.
+    reference: "PCE/HQ GAD Checklist — Section B, Item 3"
+    check_type: presence
+    param_required: [north_direction_shown]
+    failure_message: >
+      North direction not shown. Add north arrow on site plan and note:
+      "Drawing shall not be scaled — use written dimensions only."
+
+  - id: MJ_CL_B5
+    category: DRAWING
+    severity: CRITICAL
+    title: "Field engineer directions for site verification not stated"
+    description: >
+      Notes must direct field engineer to verify before execution:
+      RL, FL, HFL, max scour level upstream, foundation level,
+      bore log, soil type, SBC, and apprehension of damage to
+      nearby structures.
+    reference: "PCE/HQ GAD Checklist — Section B, Item 5"
+    check_type: presence
+    param_required: [field_engineer_directions_stated]
+    failure_message: >
+      Field engineer pre-execution verification directions not stated.
+      Add note for Engineer-in-Charge to verify: RL, FL, HFL, max scour
+      (upstream), foundation strata, SBC, and risk to nearby structures.
+
+  - id: MJ_CL_B8
+    category: DRAWING
+    severity: MAJOR
+    title: "Speed restriction provisions not mentioned"
+    description: >
+      Speed restriction applicable before/during/after execution
+      must be stated with kmph value or reference to IRPWM category.
+    reference: "PCE/HQ GAD Checklist — Section B, Item 8"
+    check_type: presence
+    param_required: [speed_restriction_provisions_stated]
+    failure_message: >
+      Speed restriction provisions not stated. Add applicable kmph
+      restriction and IRPWM provision reference.
+
+  - id: MJ_CL_B10
+    category: DRAWING
+    severity: MAJOR
+    title: "Miscellaneous details missing from notes"
+    description: >
+      Mandatory miscellaneous items must be in notes: skin reinforcement,
+      no plastering/cement wash, dry stone pitching, weep holes, backfill,
+      inspection platform, pedestal, trolley refuges, OHE mast, safety
+      measures, service cables, launching scheme, protective coating,
+      station names with MSL, railway boundary, modus operandi.
+    reference: "PCE/HQ GAD Checklist — Section B, Item 10"
+    check_type: qualitative
+    param_required: [miscellaneous_notes_complete]
+    failure_message: >
+      Miscellaneous notes incomplete. Check and add: skin reinforcement,
+      pitching, weep holes, backfill, inspection, OHE, safety, launching
+      scheme, station names with MSL, railway boundary, modus operandi.
+
+  - id: MJ_CL_B12
+    category: DRAWING
+    severity: MAJOR
+    title: "Technical data table incomplete"
+    description: >
+      Technical data table must include: lat/long, track type, UP/DN line,
+      grade, RL, FL on approaches, HFL, LWL, BL, freeboard, VC, LW,
+      loading standard, superstructure/bearing/substructure/foundation
+      types, discharge, catchment area, seismic/wind zone, sub-zone,
+      exposure condition, cover, guard rails, curve/straight, RAT/RAW
+      within 50km upstream, cross slope, river name. All RL w.r.t. MSL.
+    reference: "PCE/HQ GAD Checklist — Section B, Item 12"
+    check_type: qualitative
+    param_required: [technical_data_table_complete]
+    failure_message: >
+      Technical data table incomplete. Ensure all mandatory parameters
+      (lat/long through river name) are tabulated with RL values w.r.t. MSL.
+
+  - id: MJ_CL_B14
+    category: DRAWING
+    severity: MAJOR
+    title: "Trial pit/bore log details not in tabular form"
+    description: >
+      Bore log details must be tabular: chainage, RL at top, depth-wise
+      strata, SBC per stratum. All bore holes must be shown.
+    reference: "PCE/HQ GAD Checklist — Section B, Item 14"
+    check_type: qualitative
+    param_required: [bore_log_in_tabular_form]
+    failure_message: >
+      Bore log/trial pit not in tabular form. Provide: chainage, top RL,
+      depth-wise strata description, SBC for each layer.
+
+  - id: MJ_CL_C4
+    category: DRAWING
+    severity: MAJOR
+    title: "L-section not approved by open line — levels not verified"
+    description: >
+      L-section must be open-line approved before GAD finalisation.
+      Bridge details must be verified from approved L-section.
+      Reference: Board's letter 98/W-1/General/O/30 dated 10.06.2008.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 4"
+    check_type: qualitative
+    param_required: [l_section_approved_and_verified]
+    failure_message: >
+      L-section not approved by open line or bridge details not verified
+      from approved L-section. Submit approved L-section copy with GAD.
+
+  - id: MJ_CL_C5
+    category: HYDRAULIC
+    severity: CRITICAL
+    title: "Hydrological investigation report not submitted"
+    description: >
+      Hydrological investigation per Clause 4.1 of IRS Substructure Code
+      Appendix-I must be carried out and report submitted with GAD.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 5 / IRS Substructure Code Cl.4.1"
+    check_type: presence
+    param_required: [hydrological_investigation_done]
+    failure_message: >
+      Hydrological investigation report not submitted. Carry out per
+      IRS Substructure Code Cl.4.1 and submit with GAD package.
+
+  - id: MJ_CL_C6a
+    category: SUPERSTRUCTURE
+    severity: MAJOR
+    title: "RDSO standard drawing not followed or dimensions differ"
+    description: >
+      RDSO standard drawing must be followed for applicable span type.
+      All dimensions must match RDSO drawing exactly.
+      Reference: Board's letter 2013/CIII/BR/RDSO/Misc. dated 11.08.2014.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 6(i)"
+    check_type: qualitative
+    param_required: [rdso_standard_drawing_followed]
+    failure_message: >
+      RDSO standard drawing not followed or dimensions differ. Cite RDSO
+      drawing number and verify all critical dimensions. Deviations need
+      PCE/CAO approval with justification.
+
+  - id: MJ_CL_C6c
+    category: SUPERSTRUCTURE
+    severity: MAJOR
+    title: "Board's guidelines for superstructure type selection not followed"
+    description: >
+      Type of superstructure must be selected per Board's guidelines.
+      Reference: Board's letter No.2005/CEI/BR-II/8 dated 28.05.2009.
+      Deviation requires Board's approval.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 6(iii)"
+    check_type: qualitative
+    param_required: [superstructure_type_per_board_guidelines]
+    failure_message: >
+      Superstructure type not selected per Board's guidelines. Reference
+      Board's letter 2005/CEI/BR-II/8. If deviation, provide justification
+      and Board's approval.
+
+  - id: MJ_CL_C8
+    category: HYDRAULIC
+    severity: CRITICAL
+    title: "Design discharge not per code / RAT/RAW upstream not considered"
+    description: >
+      Design discharge per IRS Substructure Code Cl.4.2 must be shown
+      with calculation method, catchment area, and RAT/RAW check within
+      50km upstream.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 8"
+    check_type: qualitative
+    param_required: [design_discharge_calculated_per_code]
+    failure_message: >
+      Design discharge calculation method not stated or RAT/RAW check
+      not done. State method, catchment area, computed discharge, and
+      confirm RAT/RAW check within 50km upstream.
+
+  - id: MJ_CL_C9
+    category: HYDRAULIC
+    severity: CRITICAL
+    title: "Freeboard and VC not verified per IRS Substructure Code Cl.4.8 and 4.9"
+    description: >
+      Freeboard (Cl.4.8) and vertical clearance (Cl.4.9) must be
+      computed and verified per code. VC must be checked from the
+      discharge-based table. For navigable rivers, additional requirements apply.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 9 / IRS Substructure Code Cl.4.8-4.9"
+    check_type: qualitative
+    param_required: [freeboard_and_vc_per_code_confirmed]
+    failure_message: >
+      Freeboard and VC not verified against IRS Substructure Code.
+      Compute: FB >= 1.000m above HFL; VC from discharge table (or
+      1200mm for navigable rivers). Show computations on drawing.
+
+  - id: MJ_CL_C10
+    category: HYDRAULIC
+    severity: CRITICAL
+    title: "Proposed waterway not per IRS Substructure Code Cl.4.5"
+    description: >
+      Waterway calculation per Cl.4.5 must be shown: Q, Lacey's
+      velocity/limiting velocity, required area = Q/V, proposed area.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 10"
+    check_type: qualitative
+    param_required: [waterway_calculation_per_code_shown]
+    failure_message: >
+      Waterway calculation per Cl.4.5 not shown. Provide: Q, V
+      (Lacey/limiting), required area = Q/V, confirm proposed >= required.
+
+  - id: MJ_CL_C11
+    category: HYDRAULIC
+    severity: CRITICAL
+    title: "Maximum scour depth not computed per IRS Substructure Code Cl.4.6"
+    description: >
+      Maximum scour depth below HFL at each pier and abutment must be
+      computed per Clause 4.6. Scour levels must be computed individually
+      per pier — a common value is not acceptable.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 11 / IRS Substructure Code Cl.4.6"
+    check_type: qualitative
+    param_required: [scour_levels_individual]
+    failure_message: >
+      Maximum scour depth not computed per IRS Substructure Code Cl.4.6,
+      or a common value used for all piers. Compute scour depth for
+      each pier and abutment individually and state on drawing.
+
+  - id: MJ_CL_C13i
+    category: FOUNDATION
+    severity: CRITICAL
+    title: "SBC not calculated by suitable method per IRS Substructure Code Cl.6.3.1"
+    description: >
+      SBC must be calculated by a stated suitable method (SPT/IS 8009,
+      Terzaghi, plate load test) with complete settlement analysis.
+      Stating a value without method is not acceptable.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 13(i) / IRS Substructure Code Cl.6.3.1"
+    check_type: qualitative
+    param_required: [sbc_calculated_by_suitable_method]
+    failure_message: >
+      SBC not calculated by a stated suitable method. Provide method
+      (SPT/IS 8009 / Terzaghi / plate load test) with complete
+      settlement analysis calculation.
+
+  - id: MJ_CL_C14
+    category: DRAWING
+    severity: MAJOR
+    title: "GAD missing required views — half plan, L-section or elevation absent"
+    description: >
+      GAD must have: half plan at top (track level), half plan at bottom
+      (foundation level), longitudinal section, sectional elevation, key plan.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 14"
+    check_type: qualitative
+    param_required: [gad_has_all_required_views]
+    failure_message: >
+      GAD missing required views. Must include: half plan (top + bottom),
+      longitudinal section, sectional elevation, key/site plan.
+
+  - id: MJ_CL_C15
+    category: DRAWING
+    severity: MAJOR
+    title: "Dimensions in plan/elevation/section do not match"
+    description: >
+      All common dimensions across plan, elevation, and cross-section
+      views must be identical. Discrepancies must be resolved.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 15"
+    check_type: qualitative
+    param_required: [dimensions_consistent_across_views]
+    failure_message: >
+      Dimensions inconsistent across views. Identify all discrepancies
+      between plan, elevation, and section and reconcile.
+
+  - id: MJ_CL_C16
+    category: FOUNDATION
+    severity: MAJOR
+    title: "Backfill material specification not shown per IRS Substructure Code Cl.7.5"
+    description: >
+      Backfill material behind abutments and wing walls must be specified
+      per Cl.7.5 (GW/GP/SW, 100% MDD).
+    reference: "PCE/HQ GAD Checklist — Section C, Item 16 / IRS Substructure Code Cl.7.5"
+    check_type: presence
+    param_required: [backfill_material_specified]
+    failure_message: >
+      Backfill material not specified. Add: "Backfill per IRS Substructure
+      Code Cl.7.5 — GW/GP/SW granular material, 100% MDD."
+
+  - id: MJ_CL_C24
+    category: DRAWING
+    severity: MAJOR
+    title: "Flow direction not confirmed from site or shown incorrectly"
+    description: >
+      Flow direction must be confirmed from site and correctly marked
+      with arrow on plan. Incorrect flow direction affects scour computation
+      and U/S vs D/S designation.
+    reference: "PCE/HQ GAD Checklist — Section C, Item 24"
+    check_type: qualitative
+    param_required: [flow_direction_confirmed_and_shown]
+    failure_message: >
+      Flow direction not confirmed from site or incorrect on drawing.
+      Verify at site and mark correct direction with arrow on plan.
