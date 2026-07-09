@@ -17,11 +17,11 @@ from PyQt6.QtGui import QFont, QColor
 
 from gui.styles import COLORS
 from gui.ai_provider import (AIProvider, PROVIDERS, PROVIDER_ANTHROPIC,
-                              PROVIDER_GEMINI, detect_provider)
+                              PROVIDER_GEMINI, detect_provider,
+                              ANTHROPIC_MODEL)
 
-# ── Single source of truth for the model name ────────────────────────────────
-# Update ONLY this line if the API model identifier ever changes.
-CLAUDE_MODEL = "claude-sonnet-4-6"
+# ── Single source of truth for the model name is gui/ai_provider.py ──────────
+CLAUDE_MODEL = ANTHROPIC_MODEL
 
 # ── Database path helper ──────────────────────────────────────────────────────
 def _db_dir():

@@ -38,8 +38,11 @@ from PyQt6.QtGui import (
 )
 
 from gui.styles import COLORS
+from gui.ai_provider import AIProvider
 
-CLAUDE_MODEL = "claude-opus-4-5"   # use Opus for complex drawing analysis
+# Vision model IDs are centralised in gui/ai_provider.py (ANTHROPIC_MODEL / GEMINI_MODEL).
+# CAD Process 2 routes through AIProvider so it inherits dual-key (Gemini→Claude)
+# fallback and the corrected, current model IDs — no separate hardcoded model.
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # LAYER DEFINITIONS
@@ -196,7 +199,7 @@ def _validate_chain(chain: list, expected_total, label: str, warnings: list):
     """Check a dimension chain sums to expected total. Appends warnings."""
     if not chain or expected_total is None:
         return
-    total = sum(chain)
+    total = sum(v for v in chain if isinstance(v, (int, float)))
     diff  = abs(total - expected_total)
     tol   = max(5, expected_total * 0.005)   # 0.5% or 5mm tolerance
     if diff > tol:
@@ -245,8 +248,79 @@ def validate_extracted(data: dict) -> list:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# INTERPOLATION — fill missing (null) dimensions from surrounding context
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def interpolate_missing(data: dict) -> list:
+    """
+    Fill null / missing dimensions by inference from surrounding values:
+      • slab thickness  ← first vertical dim, or RL(rail) − RL(soffit)
+      • span / approach ← horizontal dimension chain
+      • abutment height ← RL(bed) − RL(cc_bottom) or vertical chain sum
+      • abutment ↔ return-wall widths ← mirrored when one side is missing
+    Mutates `data` in place. Returns a list of human-readable interpolation notes
+    so every inferred value is auditable (never silently invented).
+    """
+    notes = []
+    ev = data.get("elevation", {}) or {}
+    rl = ev.get("rl", {}) if isinstance(ev.get("rl"), dict) else {}
+
+    # 1) RCC slab thickness
+    if ev and not ev.get("rcc_slab_thk"):
+        vd = [v for v in (ev.get("vertical_dims") or []) if isinstance(v, (int, float))]
+        if vd:
+            ev["rcc_slab_thk"] = vd[0]
+            notes.append(f"slab thickness ← {vd[0]}mm (1st vertical dim)")
+        else:
+            rail, form = rl.get("rail_lvl"), rl.get("formation_lvl")
+            if rail and form:
+                thk = round((rail - form) * 1000)
+                ev["rcc_slab_thk"] = thk
+                notes.append(f"slab thickness ← {thk}mm (rail−formation RL)")
+
+    # 2) Span / approach from horizontal chain
+    hc = [v for v in (ev.get("horizontal_chain") or []) if isinstance(v, (int, float))]
+    if ev.get("span_clear") is None and hc:
+        ev["span_clear"] = max(hc)
+        notes.append(f"span_clear ← {max(hc)}mm (max of H-chain)")
+    if ev.get("approach_slab") is None and len(hc) > 1:
+        ev["approach_slab"] = min(hc)
+        notes.append(f"approach_slab ← {min(hc)}mm (min of H-chain)")
+
+    # 3) Abutment height from RL difference or vertical chain
+    ab = ev.get("abutment", {}) if isinstance(ev.get("abutment"), dict) else {}
+    if ab and ab.get("height") is None:
+        vd = [v for v in (ev.get("vertical_dims") or []) if isinstance(v, (int, float))]
+        if vd:
+            ab["height"] = sum(vd)
+            notes.append(f"abutment height ← {sum(vd)}mm (Σ vertical chain)")
+
+    # 4) Abutment ↔ return-wall symmetry (mirror missing widths)
+    ab_sec = data.get("abutment_section", {}) or {}
+    rw_sec = data.get("return_wall_section", {}) or {}
+    for src, dst, lbl in ((ab_sec, rw_sec, "return-wall"),
+                          (rw_sec, ab_sec, "abutment-section")):
+        if src and dst:
+            for k in ("top_width", "base_width", "footing"):
+                if dst.get(k) is None and src.get(k) is not None:
+                    dst[k] = src[k]
+                    notes.append(f"{lbl} {k} ← {src[k]}mm (mirrored)")
+
+    return notes
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # GEOMETRY HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
+
+def _num(v, default):
+    """None-safe numeric fetch. dict.get(key, default) returns None when the
+    JSON explicitly contains null — this coalesces that to the default too."""
+    return default if v is None else v
+
+def _chain(seq):
+    """Return a dimension chain with any null/non-numeric entries removed."""
+    return [v for v in (seq or []) if isinstance(v, (int, float))]
 
 def _line(ents, layer, x1, y1, x2, y2):
     ents.append({"type": "LINE", "layer": layer,
@@ -307,12 +381,14 @@ def _build_elevation(data: dict) -> tuple:
     rl   = ev.get("rl", {})
 
     # ── Convert RL values to Y coordinates (mm above bed level) ──────
-    rl_bed    = rl.get("bed_lvl",        97.100)
-    rl_rail   = rl.get("rail_lvl",      100.000)
-    rl_hfl    = rl.get("hfl",            99.250)
-    rl_form   = rl.get("formation_lvl",  99.540)
-    rl_cc_top = rl.get("cc_top",         96.100)
-    rl_cc_bot = rl.get("cc_bottom",      95.600)
+    # _num() coalesces explicit JSON nulls (dict.get default only covers
+    # MISSING keys, not null values — the float−NoneType crash).
+    rl_bed    = _num(rl.get("bed_lvl"),        97.100)
+    rl_rail   = _num(rl.get("rail_lvl"),      100.000)
+    rl_hfl    = _num(rl.get("hfl"),            99.250)
+    rl_form   = _num(rl.get("formation_lvl"),  99.540)
+    rl_cc_top = _num(rl.get("cc_top"),         96.100)
+    rl_cc_bot = _num(rl.get("cc_bottom"),      95.600)
 
     def rl_y(rl_m):
         """Convert an RL in metres to a Y coordinate in mm (bed = 0)."""
@@ -328,19 +404,19 @@ def _build_elevation(data: dict) -> tuple:
     # Slab thickness from vertical dim chain or RL diff
     slab_thk = ev.get("rcc_slab_thk")
     if not slab_thk:
-        vchain = ev.get("vertical_dims", [])
+        vchain = _chain(ev.get("vertical_dims"))
         slab_thk = vchain[0] if vchain else (y_rail - y_form)
 
     y_soffit = y_rail - slab_thk if slab_thk else y_form
 
     # ── Horizontal layout from dimension chain ────────────────────────
-    h_chain   = ev.get("horizontal_chain", [])
+    h_chain   = _chain(ev.get("horizontal_chain"))
     span_clear = ev.get("span_clear")
     approach   = ev.get("approach_slab")
-    ab_data    = ev.get("abutment", {})
-    ab_base_w  = ab_data.get("base_width",   3235)
-    ab_top_w   = ab_data.get("top_width",    500)
-    ab_foot_w  = ab_data.get("footing_width", 1000)
+    ab_data    = ev.get("abutment", {}) or {}
+    ab_base_w  = _num(ab_data.get("base_width"),   3235)
+    ab_top_w   = _num(ab_data.get("top_width"),    500)
+    ab_foot_w  = _num(ab_data.get("footing_width"), 1000)
 
     # Determine span and approach from chain if not explicit
     if span_clear is None:
@@ -499,14 +575,14 @@ def _build_plan(data: dict) -> tuple:
     ents = []
     pv   = data.get("plan", {})
 
-    t_chain = pv.get("transverse_chain",  [])
-    l_chain = pv.get("longitudinal_chain", [])
+    t_chain = _chain(pv.get("transverse_chain"))
+    l_chain = _chain(pv.get("longitudinal_chain"))
 
     # Fallback
     if not t_chain:
-        t_chain = [data.get("elevation", {}).get("span_clear", 4490)]
+        t_chain = [_num(data.get("elevation", {}).get("span_clear"), 4490)]
     if not l_chain:
-        cl_off = pv.get("track_cl_offset", 6100)
+        cl_off = _num(pv.get("track_cl_offset"), 6100)
         l_chain = [cl_off, cl_off]
 
     total_w = sum(t_chain)
@@ -537,7 +613,7 @@ def _build_plan(data: dict) -> tuple:
 
     # ── CENTRELINE OF TRACK ───────────────────────────────────────────
     cl_x = total_w / 2
-    cl_y = pv.get("track_cl_offset", total_l / 2)
+    cl_y = _num(pv.get("track_cl_offset"), total_l / 2)
     _line(ents, "CENTERLINE", cl_x, -1000, cl_x, total_l + 1000)
     _text(ents, "ANNOTATIONS", cl_x + 100, total_l / 2, "₵ OF TRACK", FONT)
 
@@ -635,9 +711,9 @@ def _build_section(data: dict) -> tuple:
     sv   = data.get("section", {})
     rl   = sv.get("rl", data.get("elevation", {}).get("rl", {}))
 
-    rl_bed    = rl.get("bed",        97.100)
-    rl_rail   = rl.get("rail_lvl",  100.000)
-    rl_form   = rl.get("formation_lvl", 99.540)
+    rl_bed    = _num(rl.get("bed", rl.get("bed_lvl")), 97.100)
+    rl_rail   = _num(rl.get("rail_lvl"),  100.000)
+    rl_form   = _num(rl.get("formation_lvl"), 99.540)
 
     def rl_y(v):
         return (v - rl_bed) * 1000
@@ -646,11 +722,11 @@ def _build_section(data: dict) -> tuple:
     y_rail = rl_y(rl_rail)
     y_form = rl_y(rl_form) if rl_form else y_rail - 460
 
-    slab_thk   = sv.get("rcc_slab_thk", 610)
-    t_chain    = sv.get("transverse_chain", [])
+    slab_thk   = _num(sv.get("rcc_slab_thk"), 610)
+    t_chain    = _chain(sv.get("transverse_chain"))
     total_w    = sum(t_chain) if t_chain else 9900
-    abut_w     = sv.get("abutment_width", 1676)
-    drop_dim   = sv.get("drop_wall_dim", 750)
+    abut_w     = _num(sv.get("abutment_width"), 1676)
+    drop_dim   = _num(sv.get("drop_wall_dim"), 750)
 
     FONT = 180
 
@@ -753,10 +829,10 @@ def _build_abutment_section(data: dict) -> tuple:
     ab   = data.get("abutment_section",
                     data.get("elevation", {}).get("abutment", {}))
 
-    top_w  = ab.get("top_width",  500)
-    base_w = ab.get("base_width", 3235)
-    h_dims = ab.get("height_dims", [150, 600, 600, 1000])
-    foot_w = ab.get("footing",    1000)
+    top_w  = _num(ab.get("top_width"),  500)
+    base_w = _num(ab.get("base_width"), 3235)
+    h_dims = _chain(ab.get("height_dims")) or [150, 600, 600, 1000]
+    foot_w = _num(ab.get("footing"),    1000)
     total_h = sum(h_dims)
     FONT = 180
 
@@ -896,15 +972,144 @@ def write_dxf(entities: list, output_path: str):
             msp.add_line((e["x1"], e["y1"]), (e["x2"], e["y2"]),
                          dxfattribs={"layer": layer})
         elif e["type"] == "TEXT":
-            msp.add_text(e["text"], dxfattribs={
-                "layer":  layer, "height": e.get("height", 180),
-                "insert": (e["x"], e["y"]), "style": "CADSTYLE",
+            txt = msp.add_text(e["text"], dxfattribs={
+                "layer": layer, "height": e.get("height", 180),
+                "style": "CADSTYLE",
             })
+            # set_placement is the reliable way to position TEXT in ezdxf;
+            # passing "insert" via dxfattribs is silently ignored on some builds,
+            # which stacked every label at the origin.
+            txt.set_placement((e["x"], e["y"]))
         elif e["type"] == "CIRCLE":
             msp.add_circle((e["cx"], e["cy"]), e["r"],
                            dxfattribs={"layer": layer})
 
+    # ── Frame the drawing so AutoCAD opens zoomed-to-extents, not blank ──────
+    xs, ys = [], []
+    for e in entities:
+        if e["type"] == "LINE":
+            xs += [e["x1"], e["x2"]]; ys += [e["y1"], e["y2"]]
+        elif e["type"] == "CIRCLE":
+            xs += [e["cx"] - e["r"], e["cx"] + e["r"]]
+            ys += [e["cy"] - e["r"], e["cy"] + e["r"]]
+        elif e["type"] == "TEXT":
+            xs.append(e["x"]); ys.append(e["y"])
+    if xs and ys:
+        xmin, xmax, ymin, ymax = min(xs), max(xs), min(ys), max(ys)
+        pad = (max(xmax - xmin, ymax - ymin) * 0.05) or 500
+        doc.header["$EXTMIN"] = (xmin - pad, ymin - pad, 0)
+        doc.header["$EXTMAX"] = (xmax + pad, ymax + pad, 0)
+        doc.set_modelspace_vport(
+            height=(ymax - ymin) + 2 * pad,
+            center=((xmin + xmax) / 2, (ymin + ymax) / 2))
+
     doc.saveas(output_path)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DWG EXPORT  — via ODA File Converter (free) if installed, else graceful fallback
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def find_oda_converter() -> str:
+    """Locate ODAFileConverter.exe from common install locations. '' if absent."""
+    import glob as _glob
+    patterns = [
+        r"C:\Program Files\ODA\*\ODAFileConverter.exe",
+        r"C:\Program Files (x86)\ODA\*\ODAFileConverter.exe",
+        r"C:\Program Files\ODAFileConverter*\ODAFileConverter.exe",
+        r"C:\Program Files (x86)\ODAFileConverter*\ODAFileConverter.exe",
+    ]
+    for pat in patterns:
+        hits = _glob.glob(pat)
+        if hits:
+            return hits[0]
+    return ""
+
+
+def export_dwg(dxf_path: str, out_ver: str = "ACAD2018") -> str:
+    """
+    Convert a DXF to DWG using ODA File Converter (headless CLI mode).
+    Returns the .dwg path on success, or '' if the converter is unavailable
+    or the conversion produced no file. ezdxf cannot write DWG directly, so
+    this external step is the only pure-local route to a real .dwg.
+    """
+    exe = find_oda_converter()
+    if not exe:
+        return ""
+    import subprocess
+    in_dir  = os.path.dirname(dxf_path)
+    fname   = os.path.basename(dxf_path)
+    # ODAFileConverter  InDir OutDir OutVer OutType Recurse Audit [InputFilter]
+    try:
+        subprocess.run(
+            [exe, in_dir, in_dir, out_ver, "DWG", "0", "1", fname],
+            check=False, timeout=180)
+    except Exception:
+        return ""
+    dwg = os.path.splitext(dxf_path)[0] + ".dwg"
+    return dwg if os.path.exists(dwg) else ""
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AUTOLISP EXPORT  — native AutoCAD reconstruction (load → BES-DRAW → Save As DWG)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def generate_lisp(entities: list, output_path: str) -> str:
+    """
+    Emit an AutoLISP script that rebuilds the drawing natively inside AutoCAD
+    using entmake (no external files, exact 1:1 mm coordinates). The user loads
+    it, runs BES-DRAW, then File ▸ Save As ▸ DWG — the fully portable DWG route.
+    """
+    def fmt(v):  return f"{float(v):.3f}"
+    def esc(s):  return str(s).replace("\\", "\\\\").replace('"', '\\"')
+
+    # Helper defuns must exist before BES-DRAW is invoked — define them first.
+    helpers = (
+        '(defun bes-layer (name col /)\n'
+        '  (if (not (tblsearch "LAYER" name))\n'
+        '    (entmake (list (cons 0 "LAYER") (cons 100 "AcDbSymbolTableRecord")\n'
+        '                   (cons 100 "AcDbLayerTableRecord") (cons 2 name)\n'
+        '                   (cons 70 0) (cons 62 col)))))\n'
+        '(defun bes-line (lay x1 y1 x2 y2 /)\n'
+        '  (entmake (list (cons 0 "LINE") (cons 8 lay)\n'
+        '                 (cons 10 (list x1 y1 0.0)) (cons 11 (list x2 y2 0.0)))))\n'
+        '(defun bes-text (lay x y h s /)\n'
+        '  (entmake (list (cons 0 "TEXT") (cons 8 lay)\n'
+        '                 (cons 10 (list x y 0.0)) (cons 40 h) (cons 1 s))))\n'
+        '(defun bes-circle (lay x y r /)\n'
+        '  (entmake (list (cons 0 "CIRCLE") (cons 8 lay)\n'
+        '                 (cons 10 (list x y 0.0)) (cons 40 r))))\n'
+    )
+
+    body = ['(defun c:BES-DRAW (/ oe)',
+            '  (setq oe (getvar "CMDECHO")) (setvar "CMDECHO" 0)']
+    for name in LAYERS:
+        body.append(f'  (bes-layer "{name}" 7)')
+    for e in entities:
+        lay = esc(e.get("layer", "ANNOTATIONS"))
+        if e["type"] == "LINE":
+            body.append(f'  (bes-line "{lay}" {fmt(e["x1"])} {fmt(e["y1"])} '
+                        f'{fmt(e["x2"])} {fmt(e["y2"])})')
+        elif e["type"] == "TEXT":
+            body.append(f'  (bes-text "{lay}" {fmt(e["x"])} {fmt(e["y"])} '
+                        f'{fmt(e.get("height", 180))} "{esc(e["text"])}")')
+        elif e["type"] == "CIRCLE":
+            body.append(f'  (bes-circle "{lay}" {fmt(e["cx"])} {fmt(e["cy"])} '
+                        f'{fmt(e["r"])})')
+    body += ['  (setvar "CMDECHO" oe)',
+             '  (command "._ZOOM" "_E")',
+             '  (princ "\\nBES bridge drawing complete — File > Save As > DWG.")',
+             '  (princ))']
+
+    script = (
+        "; Bridge Engineering Suite — CAD Process 2 auto-generated AutoLISP\n"
+        "; Load:  (load \"thisfile.lsp\")   then run:  BES-DRAW\n"
+        "; 1 drawing unit = 1 mm, 1:1 model space.\n\n"
+        + helpers + "\n" + "\n".join(body) + "\n(c:BES-DRAW)\n(princ)\n"
+    )
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(script)
+    return output_path
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -926,10 +1131,11 @@ class CAD2Worker(QThread):
         "Write DXF — 1:1 model space (1 unit = 1 mm)",
     ]
 
-    def __init__(self, file_path: str, api_key: str = ""):
+    def __init__(self, file_path: str, api_key: str = "", gemini_key: str = ""):
         super().__init__()
-        self.file_path = file_path
-        self.api_key   = api_key
+        self.file_path  = file_path
+        self.api_key    = api_key
+        self.gemini_key = gemini_key
 
     def run(self):
         entities = bounds = meta = dxf_path = None
@@ -968,35 +1174,25 @@ class CAD2Worker(QThread):
 
             # ── Step 1: AI Vision — extract dimension table ───────────
             self.step_active.emit(1)
-            self.log_msg.emit("Sending to Claude Vision — extracting dimension table…", "info")
+            provider = AIProvider.dual(self.gemini_key, self.api_key)
+            self.log_msg.emit(
+                f"Sending to AI vision "
+                f"({'Gemini→Claude fallback' if self.gemini_key else 'Claude'}) "
+                f"— extracting dimension table…", "info")
 
-            import anthropic as _ant
-            client = _ant.Anthropic(api_key=self.api_key)
+            user_msg = (
+                "Read this bridge GAD view by view (each titled sub-drawing: "
+                "HALF ELEVATION, CROSS SECTION OF ABUTMENT, RETURN WALL, PLAN, SECTION X-X). "
+                "Extract every visible dimension as strict JSON per the schema. "
+                "Read each number individually — never sum a chain. Use null for anything "
+                "not legible; do not guess.")
 
             if mime == "application/pdf":
-                content = [
-                    {"type": "document",
-                     "source": {"type": "base64",
-                                "media_type": "application/pdf", "data": b64}},
-                    {"type": "text",
-                     "text": "Extract the complete dimension table from this bridge GAD drawing."}
-                ]
+                raw_text = provider.vision_pdf(
+                    EXTRACT_SYSTEM_PROMPT, b64, user_msg, max_tokens=8000)
             else:
-                content = [
-                    {"type": "image",
-                     "source": {"type": "base64",
-                                "media_type": mime, "data": b64}},
-                    {"type": "text",
-                     "text": "Extract the complete dimension table from this bridge GAD drawing."}
-                ]
-
-            resp = client.messages.create(
-                model=CLAUDE_MODEL,
-                max_tokens=4096,
-                system=EXTRACT_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": content}]
-            )
-            raw_text = "".join(b.text for b in resp.content if hasattr(b, "text"))
+                raw_text = provider.vision(
+                    EXTRACT_SYSTEM_PROMPT, b64, mime, user_msg, max_tokens=8000)
             self.log_msg.emit("Dimension table received from AI.", "ok")
             self.step_done.emit(1); self.progress.emit(45)
 
@@ -1008,6 +1204,13 @@ class CAD2Worker(QThread):
                 if cleaned.lower().startswith("json"):
                     cleaned = cleaned[4:]
             data = json.loads(cleaned.strip())
+
+            # Fill any missing dimensions from surrounding context (audited)
+            interp_notes = interpolate_missing(data)
+            for n in interp_notes:
+                self.log_msg.emit(f"↳ interpolated: {n}", "warn")
+            if not interp_notes:
+                self.log_msg.emit("No missing dimensions — nothing to interpolate.", "ok")
 
             # Log what was found
             zones = data.get("zones", [])
@@ -1023,8 +1226,8 @@ class CAD2Worker(QThread):
                     f"  Elevation: span={ev.get('span_clear','?')}mm  "
                     f"rail_lvl={rl.get('rail_lvl','?')}m  "
                     f"bed_lvl={rl.get('bed_lvl','?')}m", "info")
-                h_chain = ev.get("horizontal_chain", [])
-                v_chain = ev.get("vertical_dims", [])
+                h_chain = _chain(ev.get("horizontal_chain"))
+                v_chain = _chain(ev.get("vertical_dims"))
                 if h_chain:
                     self.log_msg.emit(f"  H-chain: {h_chain}  (sum={sum(h_chain):.0f}mm)", "info")
                 if v_chain:
@@ -1517,6 +1720,14 @@ class CAD2Panel(QWidget):
         dxf_btn.setObjectName("primaryBtn"); dxf_btn.setFixedHeight(40)
         dxf_btn.clicked.connect(self._save_dxf)
         rl2.addWidget(dxf_btn)
+        dwg_btn = QPushButton("⬇   Save DWG File  (needs ODA Converter)")
+        dwg_btn.setObjectName("secondaryBtn"); dwg_btn.setFixedHeight(40)
+        dwg_btn.clicked.connect(self._save_dwg)
+        rl2.addWidget(dwg_btn)
+        lsp_btn = QPushButton("⬇   Save AutoLISP  (.lsp → load → Save As DWG)")
+        lsp_btn.setObjectName("secondaryBtn"); lsp_btn.setFixedHeight(40)
+        lsp_btn.clicked.connect(self._save_lisp)
+        rl2.addWidget(lsp_btn)
         new_btn = QPushButton("Process another file")
         new_btn.setObjectName("secondaryBtn"); new_btn.setFixedHeight(36)
         new_btn.clicked.connect(self._reset)
@@ -1590,6 +1801,10 @@ class CAD2Panel(QWidget):
                 self.settings.value("api_key",           "") or
                 os.environ.get("ANTHROPIC_API_KEY", ""))
 
+    def _get_gemini_key(self):
+        return (self.settings.value("gemini_api_key", "") or
+                os.environ.get("GEMINI_API_KEY", ""))
+
     def _upd_key(self):
         key = self._get_key()
         if key:
@@ -1626,8 +1841,9 @@ class CAD2Panel(QWidget):
 
     def _start(self):
         if not self.current_file: return
-        key = self._get_key()
-        if not key:
+        key    = self._get_key()
+        gemini = self._get_gemini_key()
+        if not key and not gemini:
             self._log("No API key configured — go to ⚙ Settings → API Keys", "err")
             return
         self.proc_btn.setEnabled(False); self.clr_btn.setEnabled(False)
@@ -1636,7 +1852,7 @@ class CAD2Panel(QWidget):
         self._log_lines = []; self.log_box.setText("")
         for st in self.steps: st.reset()
         self.status_bar.setText("  ⏳ Extracting dimension table…")
-        self.worker = CAD2Worker(self.current_file, key)
+        self.worker = CAD2Worker(self.current_file, key, gemini)
         self.worker.log_msg.connect(self._log)
         self.worker.step_active.connect(
             lambda i: self.steps[i].set_active() if i < len(self.steps) else None)
@@ -1707,6 +1923,38 @@ class CAD2Panel(QWidget):
         if path:
             shutil.copy2(self.dxf_tmp, path)
             self._log(f"DXF saved: {path}", "ok")
+
+    def _save_dwg(self):
+        if not self.dxf_tmp or not os.path.exists(self.dxf_tmp):
+            return
+        if not find_oda_converter():
+            self._log("ODA File Converter not found. Install the free converter from "
+                      "odafileconverter.com, then retry. Meanwhile the DXF opens directly "
+                      "in AutoCAD — use File ▸ Save As ▸ DWG.", "warn")
+            return
+        self._log("Converting DXF → DWG via ODA File Converter…", "info")
+        dwg = export_dwg(self.dxf_tmp)
+        if not dwg:
+            self._log("DWG conversion failed — see ODA Converter. DXF is still available.", "err")
+            return
+        base = os.path.splitext(os.path.basename(self.current_file or "bridge"))[0]
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save DWG File", f"{base}.dwg", "AutoCAD DWG (*.dwg)")
+        if path:
+            shutil.copy2(dwg, path)
+            self._log(f"DWG saved: {path}", "ok")
+
+    def _save_lisp(self):
+        if not self._entities:
+            self._log("No geometry to export — run Analyse first.", "warn")
+            return
+        base = os.path.splitext(os.path.basename(self.current_file or "bridge"))[0]
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save AutoLISP Script", f"{base}_BES.lsp", "AutoLISP (*.lsp)")
+        if path:
+            generate_lisp(self._entities, path)
+            self._log(f"LISP saved: {path}  —  in AutoCAD: (load \"{os.path.basename(path)}\") "
+                      f"then BES-DRAW, then Save As DWG.", "ok")
 
     def _reset(self):
         self.res_card.setVisible(False); self.data_grid.setVisible(False)

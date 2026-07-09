@@ -419,21 +419,6 @@ QFrame#divider {{
     border-top: 1px solid {C['navy_border']};
 }}
 
-QPushButton#pinButton {{
-    background-color: rgba(255,255,255,0.06);
-    color: {C['text_sidebar']};
-    border: 1px solid rgba(255,255,255,0.14);
-    border-radius: 8px;
-    font-size: 11px;
-    font-weight: 800;
-}}
-
-QPushButton#pinButton:hover {{
-    background-color: rgba(255,255,255,0.14);
-    color: {C['white']};
-    border-color: {C['accent']};
-}}
-
 QFrame#topBar {{
     background-color: {C['card_bg']};
     border: 1px solid {C['border']};

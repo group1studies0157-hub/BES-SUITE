@@ -22,6 +22,7 @@ from PyQt6.QtGui import QFont, QDoubleValidator
 from gui.styles import COLORS
 from gui.fig31_lookup import get_tc_ratio, get_1hr_ratio, get_scaling_k
 from gui.smart_extract import SmartExtractWidget
+from gui.scour_panel   import ScourPanel
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -52,7 +53,7 @@ SUB_ZONES = ["3E", "1", "2", "3A", "3B", "3C", "3D", "4", "5", "6", "7"]
 
 STRUCTURE_TYPES = ["RCC BOX", "ARCH", "SLAB CULVERT", "PIPE CULVERT", "BRIDGE"]
 
-SPAN_TYPES = ["RCC Box", "Arch Bridge", "RCC Slab", "PSC Girder",
+SPAN_TYPES = ["RCC Box", "Arch Bridge", "RCC Slab", "PSC Slab", "PSC Girder",
               "Steel Girder", "Plate Girder", "Pipe Culvert", "Open Web Girder"]
 
 PROPOSED_BY = ["CAO/C/SC", "CAO/C/BZA", "CAO/C/HYB", "CAO/C/GTL",
@@ -85,6 +86,25 @@ def _get_areal_reduction_factor(area_km2: float, tc_min: float) -> float:
     return table[-1][1][band]
 
 
+def _compute_tc(L: float, H_diff: float, A: float):
+    """Time of Concentration (tc), RBF-16.
+    Gradient = 1 in N = 100 / Slope% ; Slope% = (H / L_m) x 100.
+    Gradient >= 100 (flatter catchment) -> Bhatnagar's formula: tc = (L^3/H)^0.345
+    Gradient <  100 (steeper catchment) -> Bransby-Williams:   tc = 0.618*L / (A^0.1 * Slope%^0.2)
+    Returns (tc_hrs, gradient, slope_percent, formula_name).
+    """
+    L_m           = L * 1000.0
+    slope_percent = (H_diff / L_m) * 100.0 if L_m else 0.0
+    gradient      = (100.0 / slope_percent) if slope_percent else float("inf")
+    if gradient < 100.0:
+        tc_hrs   = (0.618 * L) / ((A ** 0.1) * (slope_percent ** 0.2))
+        formula  = "Bransby-Williams"
+    else:
+        tc_hrs   = (L ** 3 / H_diff) ** 0.345
+        formula  = "Bhatnagar"
+    return tc_hrs, gradient, slope_percent, formula
+
+
 def compute_newline(inp: dict) -> dict:
     try:
         A        = float(inp["catchment_area"])
@@ -94,7 +114,6 @@ def compute_newline(inp: dict) -> dict:
         OHFL     = float(inp["ohfl"])
         R50      = float(inp["r50"])
         FL       = float(inp["formation_level"])
-        vel      = float(inp["velocity"])
         width    = float(inp["width"])
         soil     = inp["soil_type"]
         slab_thk = float(inp.get("slab_thickness", "0.350"))
@@ -108,7 +127,10 @@ def compute_newline(inp: dict) -> dict:
     if H_diff <= 0:
         return {"error": "Farthest point height must be greater than Bed Level."}
 
-    tc_hrs = (L**3 / H_diff) ** 0.345
+    # ── Gradient-derived design velocity (auto — no manual entry) ─────────
+    # Topographical Slope (%) = (H / L_m) x 100 ;  Gradient = 1 in N = 100 / Slope%
+    tc_hrs, gradient, slope_percent, tc_formula = _compute_tc(L, H_diff, A)
+    vel    = 3.05 if gradient < 100.0 else 2.44
     tc_min = tc_hrs * 60.0
     F      = _get_areal_reduction_factor(A, tc_min)
 
@@ -116,9 +138,14 @@ def compute_newline(inp: dict) -> dict:
     C = k * (((R50 / 10.0) * F) ** 0.2)
 
     sub_zone      = inp.get("sub_zone", "3E")
-    tc_ratio_fig4 = get_tc_ratio(sub_zone, tc_hrs)
+    auto_tc_ratio = get_tc_ratio(sub_zone, tc_hrs)
     one_hr_ratio  = get_1hr_ratio(sub_zone)
-    K_scale       = get_scaling_k(sub_zone, tc_hrs)
+
+    # tc-hour ratio (Fig. 4 of RBF-16) is user-editable to guard against
+    # mis-read charts; if the user supplied an override, it drives K/R50/I/Q50.
+    tc_override_str = str(inp.get("tc_ratio_override", "")).strip()
+    tc_ratio_fig4 = float(tc_override_str) if tc_override_str else auto_tc_ratio
+    K_scale       = (tc_ratio_fig4 / one_hr_ratio) if one_hr_ratio else 0.0
 
     R50_1hr = one_hr_ratio * R50
     R50_tc  = K_scale * R50_1hr
@@ -134,6 +161,18 @@ def compute_newline(inp: dict) -> dict:
     net_freeboard = FL - CHFL
     freeboard_ok  = net_freeboard >= 1.000
 
+    # Provided Area (opening width x opening height) — only meaningful for
+    # box-type openings where a clear height is specified.
+    structure_type = inp.get("structure_type", "RCC BOX")
+    height_str = str(inp.get("opening_height", "")).strip()
+    height = float(height_str) if height_str else None
+    if "box" in structure_type.lower() and height:
+        provided_area = width * height
+        area_adequate = provided_area >= net_area_req
+    else:
+        provided_area = None
+        area_adequate = None
+
     return {
         "mode": "newline",
         "section": inp.get("section", ""), "bridge_no": inp.get("bridge_no", ""),
@@ -142,10 +181,13 @@ def compute_newline(inp: dict) -> dict:
         "catchment_area": A, "stream_length": L, "farthest_height": H_f,
         "bed_level": BL, "h_diff": H_diff, "soil_type": soil, "sub_zone": sub_zone,
         "ohfl": OHFL, "r50": R50, "formation_level": FL, "slab_thickness": slab_thk,
-        "velocity": vel, "width": width, "structure_type": inp.get("structure_type", "RCC BOX"),
-        "slope": H_diff / L, "tc_hrs": tc_hrs, "tc_min": tc_min, "F": F, "C": C,
+        "velocity": vel, "width": width, "structure_type": structure_type,
+        "opening_height": height, "provided_area": provided_area, "area_adequate": area_adequate,
+        "slope": slope_percent, "gradient": gradient, "tc_hrs": tc_hrs, "tc_min": tc_min,
+        "tc_formula": tc_formula, "F": F, "C": C,
         "soil_label": soil_label, "k_coeff": k,
-        "tc_ratio_fig4": tc_ratio_fig4, "one_hr_ratio": one_hr_ratio, "K_scale": K_scale,
+        "tc_ratio_fig4": tc_ratio_fig4, "tc_ratio_auto": auto_tc_ratio, "tc_ratio_overridden": bool(tc_override_str),
+        "one_hr_ratio": one_hr_ratio, "K_scale": K_scale,
         "R50_1hr": R50_1hr, "R50_tc": R50_tc, "I": I, "Q50": Q50,
         "net_area_req": net_area_req, "depth_req": depth_req, "CHFL": CHFL,
         "min_FL_req": min_FL_req, "base_clr": base_clr, "governing_FL": governing_FL,
@@ -437,8 +479,11 @@ def generate_pdf_newline(res: dict, path: str):
     # D: Hydrology
     story.append(sec_hdr("D","HYDROLOGICAL RUNOFF & CONCENTRATION ANALYSIS"))
     story.append(dtbl([
-        r3("","Topographical Slope H/L", f"{res['slope']:.4f}"),
-        r3("","Time of Concentration (tc)", f"{res['tc_hrs']:.4f} hrs  ({res['tc_min']:.2f} min)"),
+        r3("","Topographical Slope H / L",
+           f"{res['h_diff']:.3f} / {res['stream_length']:.3f} = {res['slope']:.3f}  "
+           f"(Grade = 1 in {res['gradient']:.2f})"),
+        r3("","Time of Concentration (tc)  ["+res.get('tc_formula','Bhatnagar')+"]",
+           f"{res['tc_hrs']:.4f} hrs  ({res['tc_min']:.2f} min)"),
         r3("","Rainfall Depth (R) — 50-Year 24-hr",f"{res['r50']:.0f} mm"),
         r3("","Areal Reduction Factor (F)", f"{res['F']:.3f}"),
         r3("","Runoff Coefficient (C)", f"{res['C']:.4f}"),
@@ -447,14 +492,20 @@ def generate_pdf_newline(res: dict, path: str):
 
     # E: Discharge
     story.append(sec_hdr("E","RAINFALL INTENSITY & DISCHARGE SYNTHESIS"))
+    tc_note = "  (user-adopted)" if res.get('tc_ratio_overridden') else "  (auto)"
     story.append(dtbl([
-        r3("","tc hour ratio (Fig. 3.1 of RBF-16)",f"{res['tc_ratio_fig4']:.3f}"),
-        r3("","1 hour ratio (Fig. 3.1 of RBF-16)",f"{res['one_hr_ratio']:.3f}"),
-        r3("","Scaling Coefficient K", f"{res['K_scale']:.3f}"),
-        r3("","R50 (1-hr rainfall)", f"{res['R50_1hr']:.2f} mm"),
-        r3("","R50 (tc)", f"{res['R50_tc']:.2f} mm"),
-        r3("","Critical Rainfall Intensity (I)", f"{res['I']:.3f} mm/hr"),
-        r3("","Design Flood Discharge (Q50)", f"{res['Q50']:.2f} m³/sec"),
+        r3("","tc hour ratio (Fig. 4 of RBF-16)" + tc_note, f"{res['tc_ratio_fig4']:.3f}"),
+        r3("","1 hour ratio (Fig. 4 of RBF-16)", f"{res['one_hr_ratio']:.3f}"),
+        r3("","Scaling Coefficient",
+           f"K = {res['tc_ratio_fig4']:.3f} / {res['one_hr_ratio']:.3f} = {res['K_scale']:.3f}"),
+        r3("","R50 (1-hr rainfall)",
+           f"{res['one_hr_ratio']:.3f} × {res['r50']:.2f} = {res['R50_1hr']:.2f} mm"),
+        r3("","R50 (tc)",
+           f"{res['K_scale']:.3f} × {res['R50_1hr']:.2f} = {res['R50_tc']:.2f} mm"),
+        r3("","Critical Rainfall Intensity (I)",
+           f"{res['R50_tc']:.2f} / {res['tc_hrs']:.4f} = {res['I']:.3f} mm/hr"),
+        r3("","Design Flood Discharge (Q50)",
+           f"0.278 × {res['C']:.4f} × {res['I']:.3f} × {res['catchment_area']:.4f} = {res['Q50']:.2f} m³/sec"),
     ]))
     story.append(Spacer(1,3))
     q_tbl = Table([[Paragraph(
@@ -471,7 +522,9 @@ def generate_pdf_newline(res: dict, path: str):
     fb_str = "ADEQUATE" if res['freeboard_ok'] else "INADEQUATE — REVIEW REQUIRED"
     story.append(dtbl([
         [Paragraph("a",lbl_s),Paragraph("Design Volume Discharge (Q)",lbl_s),Paragraph(f"{res['Q50']:.2f} m³/sec",val_s)],
-        [Paragraph("b",lbl_s),Paragraph("Assumed Peak Velocity (V)",lbl_s),Paragraph(f"{res['velocity']:.2f} m/sec",val_s)],
+        [Paragraph("b",lbl_s),Paragraph("Design Velocity (V) — Gradient 1 in "
+                                        f"{res['gradient']:.0f}",lbl_s),
+         Paragraph(f"{res['velocity']:.2f} m/sec",val_s)],
         [Paragraph("c",lbl_s),Paragraph("Calculated Net Waterway Area Required",lbl_s),
          Paragraph(f"{res['net_area_req']:.3f} m²",val_s)],
         [Paragraph("d",lbl_s),Paragraph("Structural Opening Type",lbl_s),Paragraph(res['structure_type'],val_s)],
@@ -489,6 +542,12 @@ def generate_pdf_newline(res: dict, path: str):
         [Paragraph("m",lbl_s),Paragraph("Net Freeboard Available",lbl_s),
          Paragraph(f"{res['net_freeboard']:.3f} m  [{fb_str}]",val_s)],
         [Paragraph("n",lbl_s),Paragraph("Design Adopted Formation Level",lbl_s),Paragraph(f"{res['formation_level']:.3f} m",val_s)],
+        [Paragraph("o",lbl_s),Paragraph("Provided Area (Opening Width × Opening Height)",lbl_s),
+         Paragraph(
+             (f"{res['width']:.2f} × {res['opening_height']:.2f} = {res['provided_area']:.3f} m²  "
+              f"[{'ADEQUATE' if res['area_adequate'] else 'INADEQUATE'}]")
+             if res.get('provided_area') is not None else "N/A (opening height not specified)",
+             val_s)],
     ], col_w=[8*mm,105*mm,W-2*M-113*mm]))
     story.append(Spacer(1,5))
 
@@ -730,6 +789,7 @@ class PreviewWidget(QWidget):
         vw = QLabel(str(value))
         vw.setStyleSheet(f"font-weight:bold; font-size:12px; color:{color}; border:none;")
         vw.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        vw.setWordWrap(True)
         r.addWidget(lw, 3)
         r.addWidget(vw, 2)
         self.content_lay.addWidget(frame)
@@ -739,12 +799,16 @@ class PreviewWidget(QWidget):
         self.placeholder.setVisible(False)
         self.content.setVisible(True)
         self._section("D", "HYDROLOGICAL ANALYSIS")
-        self._row("tc", f"{res['tc_hrs']:.4f} hrs  =  {res['tc_min']:.2f} min")
+        self._row("Topographical Slope", f"{res['slope']:.3f} %  (Grade = 1 in {res['gradient']:.2f})")
+        self._row("Design Velocity (auto)", f"{res['velocity']:.2f} m/sec", highlight=True)
+        self._row(f"tc [{res.get('tc_formula','Bhatnagar')}]", f"{res['tc_hrs']:.4f} hrs  =  {res['tc_min']:.2f} min")
         self._row("Areal Reduction Factor (F)", f"{res['F']:.3f}")
         self._row("Runoff Coefficient (C)", f"{res['C']:.4f}", highlight=True)
         self._section("E", "DISCHARGE SYNTHESIS")
-        self._row("tc ratio (Fig 3.1)", f"{res['tc_ratio_fig4']:.3f}")
-        self._row("1-hr ratio (Fig 3.1)", f"{res['one_hr_ratio']:.3f}")
+        tc_tag = "user-adopted" if res.get('tc_ratio_overridden') else "auto"
+        self._row(f"tc ratio (Fig 4, {tc_tag})", f"{res['tc_ratio_fig4']:.3f}")
+        self._row("1-hr ratio (Fig 4)", f"{res['one_hr_ratio']:.3f}")
+        self._row("Scaling Coeff. K", f"{res['tc_ratio_fig4']:.3f} / {res['one_hr_ratio']:.3f} = {res['K_scale']:.3f}")
         self._row("R50(tc)", f"{res['R50_tc']:.2f} mm")
         self._row("Critical Intensity (I)", f"{res['I']:.3f} mm/hr")
         self._row("Design Flood Discharge Q50", f"{res['Q50']:.2f} m³/sec", highlight=True)
@@ -754,6 +818,10 @@ class PreviewWidget(QWidget):
         self._row("C.H.F.L.", f"{res['CHFL']:.3f} m")
         self._row("Min. Formation Level Required", f"{res['min_FL_req']:.3f} m")
         self._row("Adopted Formation Level", f"{res['formation_level']:.3f} m")
+        if res.get('provided_area') is not None:
+            self._row("Provided Area (W × H)",
+                      f"{res['width']:.2f} × {res['opening_height']:.2f} = {res['provided_area']:.3f} m²",
+                      ok=res['area_adequate'])
         fb_ok = res['freeboard_ok']
         self._row("Net Freeboard",
                   f"{res['net_freeboard']:.3f} m  ({'✔ ADEQUATE' if fb_ok else '✘ INADEQUATE'})",
@@ -824,8 +892,51 @@ def _add_grid_row(grid, row, sl, label, widget, unit=""):
 #  MODE SELECTOR WIDGET
 # ──────────────────────────────────────────────────────────────────────────────
 
+MODE_LABELS = ["New Line calculation", "Doubling/Tripling"]
+
+# Original drop-zone height was 90px; a 60% reduction leaves 40% of that.
+_EXTRACT_ZONE_H = 36
+
+
+def _make_extract_zone() -> QWidget:
+    """Themed drop target that SmartExtractWidget gets injected into.
+
+    Background/border track the active theme's card color, and the
+    objectName-scoped stylesheet cascades a contrasting text color to any
+    plain QLabel children SmartExtractWidget adds, instead of the old
+    hardcoded navy/light-gray combo that ignored theme switches.
+    """
+    zone = QWidget()
+    zone.setObjectName("smartExtractZone")
+    zone.setFixedHeight(_EXTRACT_ZONE_H)
+    zone.setStyleSheet(
+        f"QWidget#smartExtractZone {{"
+        f"  background:{COLORS['card_bg']};"
+        f"  border:1px dashed {COLORS['border_dark']};"
+        f"  border-radius:6px;"
+        f"}}"
+        f"QWidget#smartExtractZone QLabel {{"
+        f"  color:{COLORS['text_primary']};"
+        f"  background:transparent;"
+        f"}}"
+    )
+    # The visible drop-target box is retired in favour of the "Smart Extract"
+    # button in the top bar (see HydraulicPanel._trigger_smart_extract) —
+    # that space now goes back to the Data Profile card. SmartExtractWidget
+    # is still injected into this (hidden) zone so its Browse/processing
+    # logic keeps working; the top-bar button proxies a click to it.
+    zone.setVisible(False)
+    return zone
+
+
 class ModeSelectorWidget(QWidget):
-    """Landing card shown at the top — choose New Line or Doubling."""
+    """Compact inline dropdown — choose New Line or Doubling.
+
+    Rendered next to the page title in the top bar (see
+    HydraulicPanel.top_bar_extra_widget), so it carries no title/subtitle
+    of its own — the top bar's "Hydraulic Calcs" title already covers that,
+    and duplicating it here just eats vertical space.
+    """
 
     def __init__(self, on_select):
         super().__init__()
@@ -833,70 +944,24 @@ class ModeSelectorWidget(QWidget):
         self._build()
 
     def _build(self):
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(12)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
 
-        title = QLabel("Hydraulic Calculations")
-        title.setObjectName("panelTitle")
-        lay.addWidget(title)
-
-        sub = QLabel("Select the type of waterway calculation to perform:")
+        sub = QLabel("Calc type:")
         sub.setObjectName("panelSubtitle")
-        lay.addWidget(sub)
+        row.addWidget(sub)
 
-        lay.addSpacing(8)
+        self.combo = QComboBox()
+        self.combo.addItems(MODE_LABELS)
+        self.combo.setFixedHeight(28)
+        self.combo.setFixedWidth(190)
+        self.combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.combo.currentIndexChanged.connect(self._select)
+        row.addWidget(self.combo)
 
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(16)
-
-        self.btn_newline  = self._mode_btn(
-            "🛤️  New Line",
-            "RBF-16 Catchment Method\nFor new railway lines where\nno existing bridge data available",
-            "1"
-        )
-        self.btn_doubling = self._mode_btn(
-            "🔀  Doubling / Tripling / Quadrupling",
-            "Std. VC Method (SS Code 4.8.1)\nBased on OHFL of existing bridge\nFor reconstruction / gauge conversion",
-            "2"
-        )
-
-        btn_row.addWidget(self.btn_newline)
-        btn_row.addWidget(self.btn_doubling)
-        lay.addLayout(btn_row)
-
-    def _mode_btn(self, label, desc, mode):
-        btn = QFrame()
-        btn.setObjectName("card")
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setFixedHeight(120)
-        lay = QVBoxLayout(btn)
-        lay.setContentsMargins(20, 16, 20, 16)
-        lay.setSpacing(6)
-
-        top_lbl = QLabel(label)
-        top_lbl.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        top_lbl.setStyleSheet(f"color:{COLORS['accent']};")
-        lay.addWidget(top_lbl)
-
-        desc_lbl = QLabel(desc)
-        desc_lbl.setStyleSheet(f"color:{COLORS['text_secondary']}; font-size:11px;")
-        desc_lbl.setWordWrap(True)
-        lay.addWidget(desc_lbl)
-
-        def click(ev, m=mode, b=btn):
-            self._select(m, b)
-        btn.mousePressEvent = click
-        return btn
-
-    def _select(self, mode, btn):
-        accent = COLORS['accent']
-        for b in (self.btn_newline, self.btn_doubling):
-            b.setStyleSheet("")
-        btn.setStyleSheet(
-            f"QFrame {{ border:2px solid {accent}; border-radius:8px; "
-            f"background:{COLORS.get('hover_bg', COLORS['navy_light'])}; }}"
-        )
+    def _select(self, index):
+        mode = "1" if index == 0 else "2"
         self._on_select(mode)
 
 
@@ -915,15 +980,11 @@ class NewLineForm(QWidget):
         lay.setSpacing(4)
 
         # ── Smart Extract drop zone ──────────────────────────────────
-        extract_hdr = QLabel("  🤖  Smart Extract — Drop Drawing / PDF / Excel")
-        extract_hdr.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        extract_hdr.setStyleSheet(
-            f"background:{COLORS.get('navy_mid','#1e3a5f')}; color:#e0e0e0; "
-            f"padding:3px 8px; border-radius:4px;")
-        lay.addWidget(extract_hdr)
-
-        self.extract_zone = QWidget()
-        self.extract_zone.setFixedHeight(90)
+        # The "Smart Extract" label/Browse control now lives in the top bar
+        # (see HydraulicPanel.top_bar_extra_widget) — only the compact drop
+        # target itself stays here, sized to 40% of its old height (a 60%
+        # reduction) and themed to match the active palette.
+        self.extract_zone = _make_extract_zone()
         lay.addWidget(self.extract_zone)
 
         # ── Section header ───────────────────────────────────────────
@@ -932,12 +993,22 @@ class NewLineForm(QWidget):
         hdr.setStyleSheet(f"background:{COLORS['accent']}; color:#0D1117; padding:3px 8px; border-radius:4px;")
         lay.addWidget(hdr)
 
-        # ── Compact 2-column grid ─────────────────────────────────────
+        # ── Fields ──────────────────────────────────────────────────────
         self.f_section   = _field("DKJ-BDCR")
         self.f_bridge    = _field("53")
         self.f_chainage  = _field("272311.90 m")
         self.f_opening   = _field("1×1.22 m ARCH")
         self.f_latlon    = _field("18°52'50\" N / 76°33'30\" E")
+        self.f_subzone   = _combo(SUB_ZONES)
+        self.f_struct    = _combo(STRUCTURE_TYPES)
+        self.f_soil      = _combo(SOIL_OPTIONS)
+        # Soil options are long descriptive strings — shrink the font and
+        # wrap the dropdown list so they don't force the field column wider
+        # than the matching Hydrology Inputs column.
+        self.f_soil.setStyleSheet("font-size:9px;")
+        self.f_soil.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.f_soil.setMinimumContentsLength(1)
+        self.f_soil.view().setWordWrap(True)
         self.f_area      = _field("0.2410")
         self.f_length    = _field("0.7000")
         self.f_hfarthest = _field("442.000")
@@ -945,23 +1016,25 @@ class NewLineForm(QWidget):
         self.f_ohfl      = _field("441.600")
         self.f_r50       = _field("200.000")
         self.f_fl        = _field("444.618")
-        self.f_velocity  = _field("2.44")
         self.f_width     = _field("1.50")
+        self.f_height    = _field("1.50")   # opening height — box culverts only
         self.f_slab      = _field("0.350")
-        self.f_soil      = _combo(SOIL_OPTIONS)
-        self.f_subzone   = _combo(SUB_ZONES)
-        self.f_struct    = _combo(STRUCTURE_TYPES)
+        self.f_tc_ratio  = _field("0.300")  # tc-hr ratio (Fig.4 RBF-16) — auto, editable
 
         for f in (self.f_area, self.f_length, self.f_hfarthest, self.f_bedlevel,
-                  self.f_ohfl, self.f_r50, self.f_fl, self.f_velocity, self.f_width, self.f_slab):
+                  self.f_ohfl, self.f_r50, self.f_fl, self.f_width, self.f_height,
+                  self.f_slab, self.f_tc_ratio):
             f.setValidator(QDoubleValidator())
 
-        # 2-column layout: left column = text/ID fields, right column = numeric fields
-        two_col = QHBoxLayout()
-        two_col.setSpacing(6)
+        # Shared fixed pixel widths so every card's grid columns line up
+        # identically — each _mini_section() call builds its own independent
+        # QGridLayout, so stretch factors alone don't guarantee equal pixel
+        # widths across cards (e.g. a long combo box blows one card's column
+        # out relative to the other's). Fixing widths here removes that.
+        _LBL_W, _FLD_W, _UNIT_W = 118, 92, 30
 
-        def _mini_section(title, rows_data):
-            """Build a compact card with label:field rows."""
+        def _mini_section(title, rows_data, refs=None):
+            """Build a compact full-width card with label:field rows (2 sub-columns)."""
             frm = QFrame(); frm.setObjectName("card")
             fl = QVBoxLayout(frm)
             fl.setContentsMargins(8, 6, 8, 6)
@@ -971,36 +1044,59 @@ class NewLineForm(QWidget):
             t.setStyleSheet(f"color:{COLORS['accent']}; font-size:10px;")
             fl.addWidget(t)
             g = QGridLayout()
-            g.setHorizontalSpacing(6)
+            g.setHorizontalSpacing(10)
             g.setVerticalSpacing(3)
-            g.setColumnStretch(0, 3)
-            g.setColumnStretch(1, 2)
-            for r, (lbl_text, widget, unit) in enumerate(rows_data):
+            n = len(rows_data)
+            half = (n + 1) // 2
+            for i, (lbl_text, widget, unit) in enumerate(rows_data):
+                col_block = 0 if i < half else 3
+                r = i if i < half else i - half
                 lbl = QLabel(lbl_text)
+                lbl.setWordWrap(True)
+                lbl.setFixedWidth(_LBL_W)
                 lbl.setStyleSheet("color: " + COLORS['text_secondary'] + "; font-size: 11px;")
-                g.addWidget(lbl, r, 0)
-                g.addWidget(widget, r, 1)
+                widget.setFixedWidth(_FLD_W)
+                g.addWidget(lbl, r, col_block)
+                g.addWidget(widget, r, col_block + 1)
+                u = None
                 if unit:
                     u = QLabel(unit)
+                    u.setFixedWidth(_UNIT_W)
                     u.setStyleSheet(f"color:{COLORS['text_muted']}; font-size:10px;")
-                    g.addWidget(u, r, 2)
+                    g.addWidget(u, r, col_block + 2)
+                if refs is not None:
+                    refs[lbl_text] = (lbl, widget, u)
+            # Trailing stretch column absorbs leftover width on both sub-blocks
+            # so the fixed-width columns stay pinned left instead of spreading.
+            g.setColumnStretch(2, 0); g.setColumnStretch(5, 0)
+            g.setColumnStretch(6, 1)
             fl.addLayout(g)
             return frm
 
-        # Left mini-card: ID fields
-        left_card = _mini_section("IDENTIFICATION", [
+        # Data Profile — identification fields + Soil Type, same grid as other
+        # cards so every field cell (including soil) is a consistent width.
+        id_card = _mini_section("IDENTIFICATION", [
             ("Section",           self.f_section,   ""),
             ("Bridge No.",        self.f_bridge,    ""),
             ("Chainage",          self.f_chainage,  ""),
             ("Existing Opening",  self.f_opening,   ""),
             ("Lat / Lon",         self.f_latlon,    ""),
-            ("Soil Type",         self.f_soil,      ""),
             ("Sub-Zone",          self.f_subzone,   ""),
             ("Structure Type",    self.f_struct,    ""),
+            ("Soil Type",         self.f_soil,      ""),
         ])
+        lay.addWidget(id_card)
 
-        # Right mini-card: numeric fields
-        right_card = _mini_section("HYDROLOGY INPUTS", [
+        # Wrapped full description of the selected soil type (read-only, below card)
+        self.f_soil_desc = QLabel(self.f_soil.currentText())
+        self.f_soil_desc.setWordWrap(True)
+        self.f_soil_desc.setStyleSheet(f"color:{COLORS['text_muted']}; font-size:10px; padding:2px 8px 4px 8px;")
+        lay.addWidget(self.f_soil_desc)
+        self.f_soil.currentTextChanged.connect(self.f_soil_desc.setText)
+
+        # Hydrology Inputs — moved below Data Profile (full width, 2 sub-columns)
+        self._hydro_refs = {}
+        hydro_card = _mini_section("HYDROLOGY INPUTS", [
             ("Catchment Area (A)", self.f_area,      "km²"),
             ("Stream Length (L)",  self.f_length,    "km"),
             ("Farthest Ht. (POI)", self.f_hfarthest, "m"),
@@ -1008,15 +1104,67 @@ class NewLineForm(QWidget):
             ("O.H.F.L.",           self.f_ohfl,      "m"),
             ("R50 (24hr)",         self.f_r50,       "mm"),
             ("Formation Level",    self.f_fl,        "m"),
-            ("Peak Velocity",      self.f_velocity,  "m/s"),
             ("Opening Width",      self.f_width,     "m"),
+            ("Opening Height",     self.f_height,    "m"),
             ("Slab Thickness",     self.f_slab,      "m"),
-        ])
+            ("tc-hr Ratio (Fig.4)", self.f_tc_ratio,  ""),
+        ], refs=self._hydro_refs)
+        lay.addWidget(hydro_card)
 
-        two_col.addWidget(left_card, 1)
-        two_col.addWidget(right_card, 1)
-        lay.addLayout(two_col)
-        lay.addStretch()
+        note = QLabel(
+            "Design velocity and tc formula are auto-derived from the Farthest-Point/Bed-Level "
+            "gradient (1 in N): N < 100 → 3.05 m/s & Bransby-Williams tc; N ≥ 100 → 2.44 m/s & "
+            "Bhatnagar's tc. tc-hr Ratio is auto-read from Fig. 4 of RBF-16 but editable — "
+            "correct it here if the charted value differs."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet(f"color:{COLORS['text_muted']}; font-size:10px; font-style:italic; padding:2px 4px;")
+        lay.addWidget(note)
+
+        # Opening Height only relevant for box-type structures
+        self._toggle_opening_height()
+        self.f_struct.currentTextChanged.connect(self._toggle_opening_height)
+
+        # Auto-calc tc-hr ratio (Fig.4) from current inputs; stays editable
+        self._tc_ratio_user_edited = False
+        for sig in (self.f_length.textChanged, self.f_hfarthest.textChanged,
+                    self.f_bedlevel.textChanged, self.f_area.textChanged,
+                    self.f_subzone.currentTextChanged):
+            sig.connect(self._recalc_tc_ratio)
+        self.f_tc_ratio.textEdited.connect(self._mark_tc_ratio_edited)
+        self._recalc_tc_ratio()
+
+    def _toggle_opening_height(self):
+        """Show 'Opening Height' row only when Structure Type is a box culvert."""
+        is_box = "box" in self.f_struct.currentText().lower()
+        lbl, widget, unit = self._hydro_refs["Opening Height"]
+        lbl.setVisible(is_box)
+        widget.setVisible(is_box)
+        if unit:
+            unit.setVisible(is_box)
+
+    def _mark_tc_ratio_edited(self, text):
+        self._tc_ratio_user_edited = bool(text.strip())
+
+    def _recalc_tc_ratio(self):
+        """Auto-populate tc-hr Ratio (Fig.4 RBF-16) — skipped if user has overridden it."""
+        if self._tc_ratio_user_edited:
+            return
+        try:
+            L      = float(self.f_length.text().strip())
+            H_f    = float(self.f_hfarthest.text().strip())
+            BL     = float(self.f_bedlevel.text().strip())
+            A      = float(self.f_area.text().strip())
+            H_diff = H_f - BL
+            if H_diff <= 0 or L <= 0 or A <= 0:
+                return
+            tc_hrs, _, _, _ = _compute_tc(L, H_diff, A)
+            val = get_tc_ratio(self.f_subzone.currentText(), tc_hrs)
+            self.f_tc_ratio.blockSignals(True)
+            self.f_tc_ratio.setText(f"{val:.3f}")
+            self.f_tc_ratio.blockSignals(False)
+        except (ValueError, ZeroDivisionError):
+            pass
 
     def get_inputs(self):
         return {
@@ -1032,20 +1180,23 @@ class NewLineForm(QWidget):
             "ohfl": self.f_ohfl.text().strip() or "0",
             "r50": self.f_r50.text().strip() or "0",
             "formation_level": self.f_fl.text().strip() or "0",
-            "velocity": self.f_velocity.text().strip() or "2.44",
             "width": self.f_width.text().strip() or "1.5",
+            "opening_height": self.f_height.text().strip() if self.f_height.isVisible() else "",
             "slab_thickness": self.f_slab.text().strip() or "0.35",
             "soil_type": self.f_soil.currentText(),
             "sub_zone": self.f_subzone.currentText(),
             "structure_type": self.f_struct.currentText(),
+            "tc_ratio_override": self.f_tc_ratio.text().strip() if self._tc_ratio_user_edited else "",
         }
 
     def clear(self):
         for f in (self.f_section, self.f_bridge, self.f_chainage, self.f_opening,
                   self.f_latlon, self.f_area, self.f_length, self.f_hfarthest,
                   self.f_bedlevel, self.f_ohfl, self.f_r50, self.f_fl,
-                  self.f_velocity, self.f_width, self.f_slab):
+                  self.f_width, self.f_height, self.f_slab):
             f.clear()
+        self._tc_ratio_user_edited = False
+        self._recalc_tc_ratio()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1063,15 +1214,8 @@ class DoublingForm(QWidget):
         lay.setSpacing(4)
 
         # ── Smart Extract drop zone ──────────────────────────────────
-        extract_hdr = QLabel("  🤖  Smart Extract — Drop Drawing / PDF / Excel")
-        extract_hdr.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        extract_hdr.setStyleSheet(
-            f"background:{COLORS.get('navy_mid','#1e3a5f')}; color:#e0e0e0; "
-            f"padding:3px 8px; border-radius:4px;")
-        lay.addWidget(extract_hdr)
-
-        self.extract_zone = QWidget()
-        self.extract_zone.setFixedHeight(90)
+        # See NewLineForm._build: header/Browse moved to the top bar.
+        self.extract_zone = _make_extract_zone()
         lay.addWidget(self.extract_zone)
 
         # ── Section header ───────────────────────────────────────────
@@ -1095,6 +1239,7 @@ class DoublingForm(QWidget):
         self.f_n_spans_exg    = _field("1")
         self.f_span_type_exg  = _combo(SPAN_TYPES)
         self.f_l_exg          = _field("0.91")
+        self.f_ch_exg         = _field("1.20")           # Clear Height — visible when RCC Box
         self.f_rl_exg         = _field("173.095")
         self.f_fl_exg         = _field("172.407")
         self.f_bos_exg        = _field("171.301")
@@ -1103,15 +1248,41 @@ class DoublingForm(QWidget):
         self.f_n_spans_prop   = _field("1")
         self.f_span_type_prop = _combo(SPAN_TYPES)
         self.f_l_prop         = _field("1.00")
+        self.f_ch_prop        = _field("1.20")           # Clear Height — visible when RCC Box
         self.f_rl_prop        = _field("186.152")
         self.f_fl_prop        = _field("173.095")
         self.f_bos_prop       = _field("172.333")
         self.f_us_ohfl        = _field("U/S OHFL (optional)")
 
-        for f in (self.f_l_exg, self.f_rl_exg, self.f_fl_exg, self.f_bos_exg,
-                  self.f_ohfl, self.f_bl, self.f_l_prop, self.f_rl_prop,
+        for f in (self.f_l_exg, self.f_ch_exg, self.f_rl_exg, self.f_fl_exg, self.f_bos_exg,
+                  self.f_ohfl, self.f_bl, self.f_l_prop, self.f_ch_prop, self.f_rl_prop,
                   self.f_fl_prop, self.f_bos_prop):
             f.setValidator(QDoubleValidator())
+
+        # ── Signal connections for autofill logic ──────────────────────
+        def _connect_span_autofill():
+            # Auto-update span descriptions when key fields change
+            for sig in (self.f_n_spans_exg.textChanged,
+                        self.f_l_exg.textChanged,
+                        self.f_ch_exg.textChanged,
+                        self.f_span_type_exg.currentTextChanged):
+                sig.connect(self._update_span_descs)
+            for sig in (self.f_n_spans_prop.textChanged,
+                        self.f_l_prop.textChanged,
+                        self.f_ch_prop.textChanged,
+                        self.f_span_type_prop.currentTextChanged):
+                sig.connect(self._update_span_descs)
+            # Auto-update FL when RL changes (proposed only)
+            self.f_rl_prop.textChanged.connect(self._autofill_prop_fl)
+            # Show/hide Clear Height based on span type selection
+            self.f_span_type_exg.currentTextChanged.connect(self._toggle_clear_height)
+            self.f_span_type_prop.currentTextChanged.connect(self._toggle_clear_height)
+
+        _connect_span_autofill()
+
+        # Initial visibility (default span type = RCC Box → show clear height)
+        self.f_ch_exg.setVisible(True)
+        self.f_ch_prop.setVisible(True)
 
         # ── Compact 3-column layout ──────────────────────────────────
         def _card(title, color, rows_data):
@@ -1157,27 +1328,29 @@ class DoublingForm(QWidget):
         ])
 
         exg_card = _card("EXISTING BRIDGE", COLORS.get('navy_mid','#1e3a5f'), [
-            ("No. Spans",  self.f_n_spans_exg,  ""),
-            ("Span Type",  self.f_span_type_exg, ""),
-            ("L/Waterway", self.f_l_exg,        "m"),
-            ("RL",         self.f_rl_exg,       "m"),
-            ("FL",         self.f_fl_exg,       "m"),
-            ("BOS",        self.f_bos_exg,      "m"),
-            ("OHFL",       self.f_ohfl,         "m"),
-            ("Bed Level",  self.f_bl,           "m"),
+            ("No. Spans",    self.f_n_spans_exg,  ""),
+            ("Span Type",    self.f_span_type_exg, ""),
+            ("L/Waterway",   self.f_l_exg,        "m"),
+            ("Clear Height", self.f_ch_exg,       "m"),
+            ("RL",           self.f_rl_exg,       "m"),
+            ("FL",           self.f_fl_exg,       "m"),
+            ("BOS",          self.f_bos_exg,      "m"),
+            ("OHFL",         self.f_ohfl,         "m"),
+            ("Bed Level",    self.f_bl,           "m"),
         ])
         exg_card.setStyleSheet(
             "QFrame#card { border:1.5px solid " + COLORS.get('navy_mid','#1e3a5f') + "; }"
         )
 
         prop_card = _card("PROPOSED BRIDGE", "#e05050", [
-            ("No. Spans",  self.f_n_spans_prop,  ""),
-            ("Span Type",  self.f_span_type_prop, ""),
-            ("L/Waterway", self.f_l_prop,        "m"),
-            ("RL",         self.f_rl_prop,       "m"),
-            ("FL",         self.f_fl_prop,       "m"),
-            ("BOS",        self.f_bos_prop,      "m"),
-            ("U/S OHFL",   self.f_us_ohfl,       "m"),
+            ("No. Spans",    self.f_n_spans_prop,  ""),
+            ("Span Type",    self.f_span_type_prop, ""),
+            ("L/Waterway",   self.f_l_prop,        "m"),
+            ("Clear Height", self.f_ch_prop,       "m"),
+            ("RL",           self.f_rl_prop,       "m"),
+            ("FL",           self.f_fl_prop,       "m"),   # autofilled = RL - 0.762
+            ("BOS",          self.f_bos_prop,      "m"),
+            ("U/S OHFL",     self.f_us_ohfl,       "m"),
         ])
         prop_card.setStyleSheet(
             "QFrame#card { border:1.5px solid #e05050; }"
@@ -1205,6 +1378,7 @@ class DoublingForm(QWidget):
             "n_spans_exg":    self.f_n_spans_exg.text().strip() or "1",
             "span_type_exg":  self.f_span_type_exg.currentText(),
             "l_exg":          self.f_l_exg.text().strip() or "0",
+            "ch_exg":         self.f_ch_exg.text().strip() or "0",
             "rl_exg":         self.f_rl_exg.text().strip() or "0",
             "fl_exg":         self.f_fl_exg.text().strip() or "0",
             "bos_exg":        self.f_bos_exg.text().strip() or "0",
@@ -1213,6 +1387,7 @@ class DoublingForm(QWidget):
             "n_spans_prop":   self.f_n_spans_prop.text().strip() or "1",
             "span_type_prop": self.f_span_type_prop.currentText(),
             "l_prop":         self.f_l_prop.text().strip() or "0",
+            "ch_prop":        self.f_ch_prop.text().strip() or "0",
             "rl_prop":        self.f_rl_prop.text().strip() or "0",
             "fl_prop":        self.f_fl_prop.text().strip() or "0",
             "bos_prop":       self.f_bos_prop.text().strip() or "0",
@@ -1222,11 +1397,55 @@ class DoublingForm(QWidget):
     def clear(self):
         for f in (self.f_bridge, self.f_section, self.f_chainage, self.f_between,
                   self.f_vlist, self.f_history, self.f_exg_desc, self.f_prop_desc,
-                  self.f_n_spans_exg, self.f_l_exg, self.f_rl_exg, self.f_fl_exg,
-                  self.f_bos_exg, self.f_ohfl, self.f_bl,
-                  self.f_n_spans_prop, self.f_l_prop, self.f_rl_prop,
+                  self.f_n_spans_exg, self.f_l_exg, self.f_ch_exg,
+                  self.f_rl_exg, self.f_fl_exg, self.f_bos_exg, self.f_ohfl, self.f_bl,
+                  self.f_n_spans_prop, self.f_l_prop, self.f_ch_prop, self.f_rl_prop,
                   self.f_fl_prop, self.f_bos_prop, self.f_us_ohfl):
             f.clear()
+
+    # ── Autofill helpers ──────────────────────────────────────────────────────
+
+    def _span_desc(self, n_field, l_field, ch_field, type_combo) -> str:
+        """Build span description string from current field values."""
+        n   = n_field.text().strip()   or "?"
+        lw  = l_field.text().strip()   or "?"
+        ch  = ch_field.text().strip()  or "?"
+        st  = type_combo.currentText()
+        if "box" in st.lower():
+            return f"{n} x {lw} x {ch} m {st}"
+        return f"{n} x {lw} m {st}"
+
+    def _update_span_descs(self):
+        """Auto-update Exg. Span and Prop. Span description fields."""
+        self.f_exg_desc.setText(
+            self._span_desc(self.f_n_spans_exg, self.f_l_exg,
+                            self.f_ch_exg, self.f_span_type_exg)
+        )
+        self.f_prop_desc.setText(
+            self._span_desc(self.f_n_spans_prop, self.f_l_prop,
+                            self.f_ch_prop, self.f_span_type_prop)
+        )
+
+    def _autofill_prop_fl(self):
+        """Auto-compute Proposed FL = RL - 0.762 when RL changes."""
+        try:
+            rl = float(self.f_rl_prop.text().strip())
+            fl = round(rl - 0.762, 3)
+            self.f_fl_prop.setText(f"{fl:.3f}")
+            self.f_fl_prop.setStyleSheet(
+                f"border:1.5px solid {COLORS['accent']}; border-radius:4px;"
+            )
+        except ValueError:
+            self.f_fl_prop.setStyleSheet("")
+
+    def _toggle_clear_height(self):
+        """Show Clear Height row only when RCC Box is selected."""
+        exg_is_box  = "box" in self.f_span_type_exg.currentText().lower()
+        prop_is_box = "box" in self.f_span_type_prop.currentText().lower()
+        self.f_ch_exg.setVisible(exg_is_box)
+        self.f_ch_prop.setVisible(prop_is_box)
+        # Rebuild cards to reflect visibility
+        self._update_span_descs()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1241,33 +1460,13 @@ class HydraulicPanel(QWidget):
         self._build()
 
     def _build(self):
-        # Top-level vertical: toolbar + splitter
+        # Top-level vertical: splitter only — mode/extract/preview controls
+        # now live in the top bar (see top_bar_extra_widget)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # ── Toolbar: preview toggle button ────────────────────────────────
-        toolbar = QWidget()
-        toolbar.setFixedHeight(34)
-        toolbar.setStyleSheet(
-            f"background:{COLORS.get('navy_light','#1a2540')}; "
-            f"border-bottom:1px solid {COLORS['border']};"
-        )
-        tb_lay = QHBoxLayout(toolbar)
-        tb_lay.setContentsMargins(12, 0, 12, 0)
-        tb_lay.addStretch()
-
-        self._toggle_btn = QPushButton("⬅  Hide Preview")
-        self._toggle_btn.setObjectName("secondaryBtn")
-        self._toggle_btn.setFixedHeight(24)
-        self._toggle_btn.setFixedWidth(150)
-        self._toggle_btn.setCheckable(True)
-        self._toggle_btn.setToolTip("Hide/show the calculation preview panel")
-        self._toggle_btn.clicked.connect(self._toggle_preview)
-        tb_lay.addWidget(self._toggle_btn)
-        outer.addWidget(toolbar)
-
-        # ── Splitter: left form | right preview ──────────────────────────
+        # ── Splitter: left form | right preview (no scroll — autofit) ────
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
         self._splitter.setHandleWidth(5)
         self._splitter.setChildrenCollapsible(True)
@@ -1275,29 +1474,45 @@ class HydraulicPanel(QWidget):
             "QSplitter::handle { background: " + COLORS["border"] + "; }"
             "QSplitter::handle:hover { background: " + COLORS["accent"] + "; }"
         )
-        outer.addWidget(self._splitter)
+        outer.addWidget(self._splitter, 1)
 
-        # ── LEFT pane ────────────────────────────────────────────────────
+        # ── LEFT pane (direct widget, no QScrollArea) ─────────────────────
         left_container = QWidget()
-        left_outer = QVBoxLayout(left_container)
-        left_outer.setContentsMargins(0, 0, 0, 0)
-
-        left_scroll = QScrollArea()
-        left_scroll.setWidgetResizable(True)
-        left_scroll.setFrameShape(QFrame.Shape.NoFrame)
-
-        left_widget = QWidget()
-        self._left_lay = QVBoxLayout(left_widget)
+        self._left_lay = QVBoxLayout(left_container)
         self._left_lay.setContentsMargins(20, 20, 14, 20)
         self._left_lay.setSpacing(0)
-        left_scroll.setWidget(left_widget)
-        left_outer.addWidget(left_scroll)
         self._splitter.addWidget(left_container)
 
-        # Mode selector
+        # Mode dropdown + Smart Extract + Hide/Show Preview all render as one
+        # compact row in the top bar next to the page title (see
+        # top_bar_extra_widget below) instead of eating three separate rows
+        # here — that space goes back to the A. Data Profile card instead.
         self._mode_sel = ModeSelectorWidget(self._on_mode_selected)
-        self._left_lay.addWidget(self._mode_sel)
-        self._left_lay.addSpacing(12)
+
+        self._extract_btn = QPushButton("🤖  Smart Extract")
+        self._extract_btn.setObjectName("secondaryBtn")
+        self._extract_btn.setFixedHeight(28)
+        self._extract_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._extract_btn.setToolTip(
+            "Browse for a Drawing / PDF / Excel file to auto-fill this form."
+        )
+        self._extract_btn.clicked.connect(self._trigger_smart_extract)
+
+        self._toggle_btn = QPushButton("⬅  Hide Preview")
+        self._toggle_btn.setObjectName("secondaryBtn")
+        self._toggle_btn.setFixedHeight(28)
+        self._toggle_btn.setCheckable(True)
+        self._toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._toggle_btn.setToolTip("Hide/show the calculation preview panel")
+        self._toggle_btn.clicked.connect(self._toggle_preview)
+
+        self._top_extra = QWidget()
+        extra_lay = QHBoxLayout(self._top_extra)
+        extra_lay.setContentsMargins(0, 0, 0, 0)
+        extra_lay.setSpacing(10)
+        extra_lay.addWidget(self._mode_sel)
+        extra_lay.addWidget(self._extract_btn)
+        extra_lay.addWidget(self._toggle_btn)
 
         self._form_sep = QFrame()
         self._form_sep.setFrameShape(QFrame.Shape.HLine)
@@ -1312,7 +1527,9 @@ class HydraulicPanel(QWidget):
         self._form_doubling = DoublingForm()
         self._form_stack.addWidget(self._form_newline)
         self._form_stack.addWidget(self._form_doubling)
-        self._left_lay.addWidget(self._form_stack)
+        # Stretch factor 1: soaks up any leftover vertical space so the
+        # buttons/status row settles near the bottom with no dead gap.
+        self._left_lay.addWidget(self._form_stack, 1)
         self._left_lay.addSpacing(12)
 
         self._btn_area = QWidget()
@@ -1334,6 +1551,22 @@ class HydraulicPanel(QWidget):
         self._dl_btn.clicked.connect(self._download_pdf)
         btn_row.addWidget(self._dl_btn)
 
+        # Scour Depth Calc — same shape/size as Calculate, distinct color.
+        # Only computes/opens the scour panel when the user clicks it.
+        self._scour_btn = QPushButton("🌊  Scour Depth Calc")
+        self._scour_btn.setFixedHeight(40)
+        self._scour_btn.setCheckable(True)
+        self._scour_btn.setEnabled(False)
+        self._scour_btn.setStyleSheet(
+            "QPushButton { background:#C9821A; color:#0D1117; border:none; "
+            "border-radius:6px; padding:0 16px; font-weight:600; }"
+            "QPushButton:hover:!disabled { background:#E0973A; }"
+            "QPushButton:checked { background:#A56A14; }"
+            "QPushButton:disabled { background:#4a4a4a; color:#8a8a8a; }"
+        )
+        self._scour_btn.clicked.connect(self._toggle_scour)
+        btn_row.addWidget(self._scour_btn)
+
         self._clear_btn = QPushButton("✕  Clear")
         self._clear_btn.setObjectName("dangerBtn")
         self._clear_btn.setFixedHeight(40)
@@ -1347,22 +1580,12 @@ class HydraulicPanel(QWidget):
         self._status_lbl.setStyleSheet(f"color:{COLORS['text_muted']}; font-size:11px; font-style:italic;")
         self._status_lbl.setVisible(False)
         self._left_lay.addWidget(self._status_lbl)
-        self._left_lay.addStretch()
 
-        # ── RIGHT pane: preview ──────────────────────────────────────────
+        # ── RIGHT pane: preview (direct widget, no QScrollArea) ───────────
         self._right_container = QWidget()
-        right_outer = QVBoxLayout(self._right_container)
-        right_outer.setContentsMargins(0, 0, 0, 0)
-
-        right_scroll = QScrollArea()
-        right_scroll.setWidgetResizable(True)
-        right_scroll.setFrameShape(QFrame.Shape.NoFrame)
-
-        right_widget = QWidget()
-        right_lay = QVBoxLayout(right_widget)
+        right_lay = QVBoxLayout(self._right_container)
         right_lay.setContentsMargins(18, 20, 20, 20)
         right_lay.setSpacing(0)
-        right_scroll.setWidget(right_widget)
 
         prev_hdr = QLabel("Calculation Preview")
         prev_hdr.setObjectName("panelTitle")
@@ -1378,14 +1601,46 @@ class HydraulicPanel(QWidget):
 
         right_lay.addSpacing(12)
         self._preview = PreviewWidget()
-        right_lay.addWidget(self._preview)
-        right_lay.addStretch()
+        right_lay.addWidget(self._preview, 1)
 
-        right_outer.addWidget(right_scroll)
         self._splitter.addWidget(self._right_container)
 
-        # Default: 55% form, 45% preview
-        self._splitter.setSizes([560, 440])
+        # Default: 50% form, 50% preview (wider so results aren't clipped)
+        self._splitter.setSizes([500, 500])
+        self._splitter.setStretchFactor(0, 1)
+        self._splitter.setStretchFactor(1, 1)
+
+        # ── Scour Depth panel — hidden until "Scour Depth Calc" is clicked ─
+        self._scour_container = QWidget()
+        self._scour_container.setVisible(False)
+        scour_lay = QVBoxLayout(self._scour_container)
+        scour_lay.setContentsMargins(0, 0, 0, 0)
+        self._scour_panel = ScourPanel()
+        scour_lay.addWidget(self._scour_panel)
+        outer.addWidget(self._scour_container)
+
+        # Default mode = New Line, so the form is visible immediately
+        self._on_mode_selected("1")
+
+    # ── Top bar integration ───────────────────────────────────────────────────
+
+    def top_bar_extra_widget(self) -> QWidget:
+        """Mode dropdown + Smart Extract hint, rendered next to the page title."""
+        return self._top_extra
+
+    # ── Scour Depth toggle ───────────────────────────────────────────────────
+
+    def _toggle_scour(self):
+        if not self._result:
+            QMessageBox.information(self, "Run Calculate First",
+                                     "Please run Calculate before opening Scour Depth calculations.")
+            self._scour_btn.setChecked(False)
+            return
+        showing = not self._scour_container.isVisible()
+        if showing:
+            self._scour_panel.autofill(self._result)
+        self._scour_container.setVisible(showing)
+        self._scour_btn.setChecked(showing)
 
     # ── Preview toggle ────────────────────────────────────────────────────────
 
@@ -1397,10 +1652,38 @@ class HydraulicPanel(QWidget):
             self._splitter.setSizes([1, 0])
             self._toggle_btn.setText("➡  Show Preview")
         else:
-            # Show: restore 55/45 split
+            # Show: restore 50/50 split
             self._right_container.setVisible(True)
-            self._splitter.setSizes([560, 440])
+            self._splitter.setSizes([500, 500])
             self._toggle_btn.setText("⬅  Hide Preview")
+
+    # ── Smart Extract (top-bar button proxy) ───────────────────────────────────
+
+    def _trigger_smart_extract(self):
+        """Forward a click on the top-bar Smart Extract button into the
+        active mode's (hidden) SmartExtractWidget — same extraction flow
+        its own drag-and-drop and Browse button both already use.
+
+        The visible drop-target box is retired to free vertical space for
+        the Data Profile card; SmartExtractWidget is still alive and
+        injected into form.extract_zone (just invisible), so nothing about
+        its file-reading/autofill logic changes — this just opens its file
+        picker directly.
+        """
+        if self._mode is None:
+            return
+        form = self._form_newline if self._mode == "1" else self._form_doubling
+        zone = form.extract_zone
+
+        extractor = zone.findChild(SmartExtractWidget)
+        if extractor is not None:
+            extractor.trigger_browse()
+        else:
+            QMessageBox.information(
+                self, "Smart Extract",
+                "Smart Extract isn't ready yet for this mode — try switching "
+                "the calculation type and back."
+            )
 
     # ── Mode selection ────────────────────────────────────────────────────────
 
@@ -1412,6 +1695,9 @@ class HydraulicPanel(QWidget):
         self._btn_area.setVisible(True)
         self._status_lbl.setVisible(True)
         self._dl_btn.setEnabled(False)
+        self._scour_btn.setEnabled(False)
+        self._scour_btn.setChecked(False)
+        self._scour_container.setVisible(False)
         self._status_lbl.setText(
             "New Line (RBF-16)" if mode == "1"
             else "Doubling / Tripling / Quadrupling (Std.VC)"
@@ -1463,8 +1749,14 @@ class HydraulicPanel(QWidget):
             self._preview.update_doubling(res)
 
         self._dl_btn.setEnabled(True)
+        self._scour_btn.setEnabled(True)
         self._status_lbl.setText("Calculate complete — review preview before downloading.")
         self._status_lbl.setStyleSheet(f"color:{COLORS['accent']}; font-size:11px;")
+
+        # Refresh scour panel only if the user already has it open;
+        # otherwise it stays closed until "Scour Depth Calc" is clicked.
+        if self._scour_container.isVisible():
+            self._scour_panel.autofill(res)
 
     # ── Download PDF ──────────────────────────────────────────────────────────
 
@@ -1540,5 +1832,8 @@ class HydraulicPanel(QWidget):
         self._form_doubling.clear()
         self._result = None
         self._dl_btn.setEnabled(False)
+        self._scour_btn.setEnabled(False)
+        self._scour_btn.setChecked(False)
+        self._scour_container.setVisible(False)
         self._status_lbl.setText("")
         self._preview.reset()

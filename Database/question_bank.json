@@ -317,7 +317,7 @@
         "explanation": "Standard BG concrete sleeper dimensions are 2750 mm (length) × 250 mm (width) × 210 mm (depth) as per IRPWM specifications.",
         "difficulty": "medium",
         "source": "IRPWM Para — Sleeper Standards",
-        "attempt_count": 0
+        "attempt_count": 1
       },
       {
         "question": "The schedule of inspection by ADEN for normal track is ___",
@@ -331,7 +331,7 @@
         "explanation": "ADEN is required to inspect normal track once a year (annually) as per IRPWM inspection schedule for permanent way officials.",
         "difficulty": "easy",
         "source": "IRPWM Para — Inspection Schedule",
-        "attempt_count": 0
+        "attempt_count": 1
       },
       {
         "question": "What is the normal gauge for Broad Gauge in Indian Railways?",
@@ -345,7 +345,7 @@
         "explanation": "The standard gauge for Broad Gauge in Indian Railways is 1676 mm (5 ft 6 inches), measured between inner faces of rail heads.",
         "difficulty": "easy",
         "source": "IRPWM Para 101 — Track Standards",
-        "attempt_count": 0
+        "attempt_count": 1
       },
       {
         "question": "As per IRPWM, the maximum permissible speed on a track with maximum unevenness is ___",
@@ -373,7 +373,7 @@
         "explanation": "Fish plates (joint bars) are used to connect two rail ends at joints, maintaining alignment and gauge continuity.",
         "difficulty": "easy",
         "source": "IRPWM — Track Fixtures",
-        "attempt_count": 0
+        "attempt_count": 1
       },
       {
         "question": "Track patrolling in summer for speeds > 110 kmph route: push trolley or by foot inspection of entire section should be done ___",
@@ -387,7 +387,7 @@
         "explanation": "For speeds > 110 kmph, complete push trolley/foot inspection of the entire section must be done once in 4 months as per IRPWM.",
         "difficulty": "easy",
         "source": "IRPWM — Inspection Schedule ADEN",
-        "attempt_count": 0
+        "attempt_count": 1
       },
       {
         "question": "The minimum density of sleepers per km for BG main line track is ___",
@@ -415,7 +415,7 @@
         "explanation": "Rail creep occurs due to a combination of thermal expansion/contraction and braking/traction forces from passing trains.",
         "difficulty": "medium",
         "source": "IRPWM — Rail Maintenance",
-        "attempt_count": 0
+        "attempt_count": 1
       },
       {
         "question": "The purpose of providing cant (superelevation) in a curve is ___",
@@ -457,7 +457,7 @@
         "explanation": "The maximum permissible cant deficiency on BG track for passenger trains is 75 mm as per IRPWM curve standards.",
         "difficulty": "hard",
         "source": "IRPWM — Curve Standards",
-        "attempt_count": 0
+        "attempt_count": 1
       },
       {
         "question": "Track geometry parameters measured by MTRC (Mechanical Track Recording Car) include ___",
@@ -485,7 +485,7 @@
         "explanation": "The absolute minimum radius of curve on BG main line is 175 m (special circumstances), while 200 m is the minimum for group A & B routes.",
         "difficulty": "hard",
         "source": "IRPWM — Curve Standards",
-        "attempt_count": 0
+        "attempt_count": 1
       },
       {
         "question": "Rails are classified by ___",
@@ -527,7 +527,7 @@
         "explanation": "Flash butt welding can be done either at a central welding depot (stationary machine) or by mobile flash butt welding machine at site.",
         "difficulty": "medium",
         "source": "IRPWM / SOD — Rail Welding",
-        "attempt_count": 0
+        "attempt_count": 1
       },
       {
         "question": "As per IRPWM, sleeper density is expressed as ___",
@@ -569,7 +569,7 @@
         "explanation": "Track inspection by motor trolley must be done at not more than 30 kmph to allow proper observation of track condition.",
         "difficulty": "medium",
         "source": "IRPWM — Track Inspection",
-        "attempt_count": 0
+        "attempt_count": 1
       },
       {
         "question": "Alumino Thermit (AT) welding is used for ___",
@@ -612,6 +612,23 @@
         "difficulty": "hard",
         "source": "IRPWM — LWR Maintenance",
         "attempt_count": 1
+      },
+      {
+        "correct": 2,
+        "created": "2026-07-07",
+        "difficulty": "easy",
+        "explanation": "The title of the document explicitly states 'RULES SPECIFYING THE LOADS FOR DESIGN OF SUPER-STRUCTURE AND SUB-STRUCTURE OF BRIDGES AND FOR ASSESSMENT OF THE STRENGTH OF EXISTING BRIDGES'.",
+        "options": [
+          "Specifying track maintenance standards",
+          "Detailing signaling system requirements",
+          "Specifying loads for design and strength assessment of bridges",
+          "Guidelines for railway station construction"
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "What is the primary purpose of the Bridge Rules (in SI Units) issued by the Ministry of Railways?",
+        "source": "Bridge Rules, Title Page",
+        "topic": "IRPWM"
       }
     ],
     "SOD_USFD": [

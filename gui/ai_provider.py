@@ -25,13 +25,24 @@ Dual-key mode (new)
 import base64, re
 
 # ── Model IDs ──────────────────────────────────────────────────────────────
-ANTHROPIC_MODEL = "claude-sonnet-4-6"
-GEMINI_MODEL    = "gemini-2.0-flash"
+# Updated 2026-07-06: claude-sonnet-4-6 → claude-sonnet-5 (current default Sonnet);
+# gemini-2.0-flash was retired 2026-06-01 → gemini-2.5-flash (current stable).
+ANTHROPIC_MODEL = "claude-sonnet-5"
+GEMINI_MODEL    = "gemini-2.5-flash"
 
 # ── Provider name constants ─────────────────────────────────────────────────
 PROVIDER_ANTHROPIC = "Anthropic (Claude)"
 PROVIDER_GEMINI    = "Google (Gemini)"
 PROVIDERS          = [PROVIDER_ANTHROPIC, PROVIDER_GEMINI]
+
+def _anthropic_text(resp) -> str:
+    """Join only the text blocks of a Messages response.
+    Newer models (Sonnet 5+) may emit a ThinkingBlock before the TextBlock,
+    so resp.content[0].text is no longer safe."""
+    return "".join(
+        b.text for b in resp.content
+        if getattr(b, "type", "") == "text" or hasattr(b, "text")
+    )
 
 def detect_provider(api_key: str) -> str:
     """Auto-detect provider from key prefix."""
@@ -198,7 +209,7 @@ class AIProvider:
             system=system,
             messages=[{"role": "user", "content": user}]
         )
-        return resp.content[0].text
+        return _anthropic_text(resp)
 
     @staticmethod
     def _anthropic_vision_key(api_key, system, image_b64, mime, user, max_tokens):
@@ -216,7 +227,7 @@ class AIProvider:
                 {"type": "text", "text": user}
             ]}]
         )
-        return resp.content[0].text
+        return _anthropic_text(resp)
 
     @staticmethod
     def _anthropic_vision_pdf_key(api_key, system, pdf_b64, user, max_tokens):
@@ -234,7 +245,7 @@ class AIProvider:
                 {"type": "text", "text": user}
             ]}]
         )
-        return resp.content[0].text
+        return _anthropic_text(resp)
 
     # ══════════════════════════════════════════════════════════════════════
     # GEMINI BACKENDS  (original single-key variants)

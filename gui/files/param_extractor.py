@@ -323,14 +323,15 @@ def extract_parameters(gad: GADText, api_key: str) -> ExtractedParams:
 
     prompt = build_extraction_prompt(gad)
 
+    from gui.ai_provider import ANTHROPIC_MODEL, _anthropic_text
     message = client.messages.create(
-        model="claude-sonnet-4-5",
+        model=ANTHROPIC_MODEL,
         max_tokens=2000,
         system=EXTRACTION_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt}]
     )
 
-    raw_response = message.content[0].text
+    raw_response = _anthropic_text(message)
 
     # Parse JSON response
     params = ExtractedParams()

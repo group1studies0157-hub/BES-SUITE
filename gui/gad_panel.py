@@ -591,14 +591,15 @@ def _ai_full_verification(base_path: str, corr_path: str,
         try:
             if log_fn: log_fn("  → Trying Claude…", "info")
             import anthropic
+            from gui.ai_provider import ANTHROPIC_MODEL, _anthropic_text
             client = anthropic.Anthropic(api_key=claude_key)
             resp   = client.messages.create(
-                model="claude-opus-4-5",
+                model=ANTHROPIC_MODEL,
                 max_tokens=4000,
                 system=system_prompt,
                 messages=[{"role": "user", "content": content}]
             )
-            raw = resp.content[0].text.strip()
+            raw = _anthropic_text(resp).strip()
         except Exception as e:
             if log_fn: log_fn(f"  Claude failed: {e}", "err")
             return []
@@ -684,13 +685,14 @@ def _ai_compare_annotations(corrections: list[dict],
     if not raw and claude_key:
         try:
             import anthropic
+            from gui.ai_provider import ANTHROPIC_MODEL, _anthropic_text
             client = anthropic.Anthropic(api_key=claude_key)
             resp   = client.messages.create(
-                model="claude-opus-4-5", max_tokens=3000,
+                model=ANTHROPIC_MODEL, max_tokens=3000,
                 system=system_prompt,
                 messages=[{"role": "user", "content": content}]
             )
-            raw = resp.content[0].text.strip()
+            raw = _anthropic_text(resp).strip()
         except Exception as e:
             if log_fn: log_fn(f"AI compare failed: {e}", "err")
             return corrections

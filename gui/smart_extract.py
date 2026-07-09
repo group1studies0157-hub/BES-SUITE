@@ -745,6 +745,14 @@ class SmartExtractWidget(QWidget):
 
     # ── Browse ─────────────────────────────────────────────────────────────
 
+    def trigger_browse(self):
+        """Public entry point for an external trigger (e.g. a 'Smart Extract'
+        button living outside this widget, such as in the top bar) to open
+        the same file picker as the in-widget Browse button. Drag-and-drop
+        and Browse both ultimately call _start(path) below — this is just
+        a third door into that same flow, not a separate code path."""
+        self._browse()
+
     def _browse(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Select File",

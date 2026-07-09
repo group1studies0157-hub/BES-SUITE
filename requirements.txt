@@ -21,6 +21,11 @@ PyMuPDF>=1.23.0
 anthropic>=0.25.0
 # Set ANTHROPIC_API_KEY env var, or enter key directly in the app Settings panel
 
+# ── AI Vision — Google Gemini (dual-key auto-fallback, tried first) ───────────
+google-generativeai>=0.8.0
+# Set GEMINI_API_KEY env var, or enter key directly in the app Settings panel
+# Without this package the app skips Gemini and uses Claude automatically.
+
 # ── Local OCR fallback (free, offline, optional) ──────────────────────────────
 pytesseract>=0.3.10
 # Requires Tesseract binary: https://github.com/UB-Mannheim/tesseract/wiki (Windows)

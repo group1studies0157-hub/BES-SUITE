@@ -1,41 +1,49 @@
-"""
-Bridge Engineering Suite  —  main.py
-Entry point: initialises QApplication, primes the saved theme (Fusion + QPalette + QSS),
-then opens MainWindow.
-"""
+"""Bridge Engineering Suite entry point."""
 
-import sys
-print(sys.executable)
+from __future__ import annotations
+
 import os
+import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui     import QFont
 
 
-def main():
+ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, ROOT)
+
+
+def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("Bridge Engineering Suite")
     app.setApplicationVersion("2.0")
     app.setOrganizationName("BES")
-
-    # Global font baseline
     app.setFont(QFont("Segoe UI", 10))
 
-    # ── Apply saved theme BEFORE creating any widgets ────────────────────
-    # This sets Fusion style + full QPalette + QSS in one call so every
-    # widget — including those created inside MainWindow.__init__ — inherits
-    # the correct dark/light colours from birth, not after a repaint.
-    from gui.styles import apply_theme, _saved_theme
+    from gui.ui_text import install_text_sanitizer
+
+    install_text_sanitizer()
+
+    from gui.intro_screen import IntroScreen
+    from gui.main_window import MainWindow
+    from gui.styles import _saved_theme, apply_theme
+
     apply_theme(_saved_theme(), app)
 
-    from gui.main_window import MainWindow
-    window = MainWindow()
-    window.show()
+    state = {"window": None, "intro": None}
 
-    sys.exit(app.exec())
+    def show_main_window():
+        window = MainWindow()
+        state["window"] = window
+        window.show()
+
+    intro = IntroScreen()
+    state["intro"] = intro
+    intro.finished.connect(show_main_window)
+    intro.start()
+
+    return app.exec()
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
