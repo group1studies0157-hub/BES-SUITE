@@ -1,0 +1,39 @@
+# ---------------------------------------------------------------------------
+# Bridge Engineering Suite - ignore machine-specific / generated files
+# ---------------------------------------------------------------------------
+
+# Python bytecode & caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments (each PC builds its own; never commit these)
+venv/
+venv_broken*/
+.venv/
+env/
+ENV/
+
+# Distribution / build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Test / coverage / type-checker caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editor / OS cruft
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Logs & local runtime output
+*.log
