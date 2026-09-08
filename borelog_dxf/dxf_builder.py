@@ -25,19 +25,9 @@ import ezdxf
 from ezdxf.enums import TextEntityAlignment
 
 from .model import BoreholeRecord
-from .soil_classify import classify_and_style, HATCH_STYLE
 
 LAYER_DEFS = {
     'BOREHOLE-OUTLINE':          {'color': 7},
-    'BOREHOLE-HATCH-OVERBURDEN': {'color': 3},
-    'BOREHOLE-HATCH-GRAVEL':     {'color': 3},
-    'BOREHOLE-HATCH-SAND':       {'color': 2},
-    'BOREHOLE-HATCH-SILT':       {'color': 8},
-    'BOREHOLE-HATCH-CLAY':       {'color': 5},
-    'BOREHOLE-HATCH-WEATHERED':  {'color': 2},
-    'BOREHOLE-HATCH-SOFTROCK':   {'color': 4},
-    'BOREHOLE-HATCH-ROCK':       {'color': 4},
-    'BOREHOLE-HATCH-HARDROCK':   {'color': 6},
     'BOREHOLE-TEXT':             {'color': 7},
     'BOREHOLE-TICKS':            {'color': 7},
     'BOREHOLE-TERMINATION':      {'color': 1},
@@ -48,17 +38,6 @@ LAYER_DEFS = {
     'BOREHOLE-LABEL':            {'color': 1},
 }
 
-_HATCH_LAYER_BY_CATEGORY = {
-    'overburden': 'BOREHOLE-HATCH-OVERBURDEN',
-    'gravel': 'BOREHOLE-HATCH-GRAVEL',
-    'sand': 'BOREHOLE-HATCH-SAND',
-    'silt': 'BOREHOLE-HATCH-SILT',
-    'clay': 'BOREHOLE-HATCH-CLAY',
-    'weathered_rock': 'BOREHOLE-HATCH-WEATHERED',
-    'soft_rock': 'BOREHOLE-HATCH-SOFTROCK',
-    'rock': 'BOREHOLE-HATCH-ROCK',
-    'hard_rock': 'BOREHOLE-HATCH-HARDROCK',
-}
 
 # rough width-per-character-height ratio for the default ezdxf/AutoCAD
 # simplex-style font, used only to size the underline below a label
@@ -101,6 +80,67 @@ class BoreLogDxfBuilder:
         t.set_placement((x, y), align=align)
         return t
 
+    @staticmethod
+    def _wrap_text(text: str, text_height: float, available_width: float) -> list[str]:
+        """Wrap *text* into lines that fit within *available_width* DXF units,
+        given the font metrics (_CHAR_WIDTH_FACTOR).  Tries to break on
+        word boundaries; falls back to hard-breaking a single long word
+        when one token is wider than the column."""
+        if not text or not text.strip():
+            return []
+        char_w = text_height * _CHAR_WIDTH_FACTOR
+        max_chars = max(1, int(available_width / char_w))
+        words = text.split()
+        lines: list[str] = []
+        current = ""
+        for word in words:
+            # test if appending this word fits on the current line
+            candidate = f"{current} {word}".strip() if current else word
+            if len(candidate) <= max_chars:
+                current = candidate
+            else:
+                if current:
+                    lines.append(current)
+                # if the word itself is too long, hard-break it
+                while len(word) > max_chars:
+                    lines.append(word[:max_chars])
+                    word = word[max_chars:]
+                current = word
+        if current:
+            lines.append(current)
+        return lines or [text]
+
+    def _draw_wrapped_text(self, msp, text: str, x_center: float,
+                           y_top: float, y_bot: float, text_height: float,
+                           layer: str) -> None:
+        """Draw *text* horizontally, word-wrapped, centred vertically
+        between *y_top* and *y_bot*.  Reduces *text_height* automatically
+        when the wrapped block is taller than the cell."""
+        if not text or not text.strip():
+            return
+        available_w = self.col_w - 4  # leave a small margin inside the cell
+        cell_h = abs(y_top - y_bot)
+        line_spacing = text_height * 1.35
+
+        # try with requested text_height first, shrink if needed
+        for attempt_h in (text_height, max(1.0, text_height * 0.85),
+                          max(0.8, text_height * 0.7)):
+            lines = self._wrap_text(text, attempt_h, available_w)
+            block_h = len(lines) * attempt_h * 1.35
+            if block_h <= cell_h - 1.0:          # leave ~0.5 margin top+bottom
+                break
+        else:
+            # even at the smallest size it doesn't fully fit – draw what we can
+            lines = self._wrap_text(text, attempt_h, available_w)
+
+        total_block_h = len(lines) * attempt_h * 1.35
+        # centre vertically in the cell
+        y_start = (y_top + y_bot) / 2 + total_block_h / 2 - attempt_h
+        for i, line in enumerate(lines):
+            y = y_start - i * attempt_h * 1.35
+            self._add_text(msp, line, x_center, y, attempt_h, layer,
+                           align=TextEntityAlignment.MIDDLE_CENTER)
+
     def _add_underlined_label(self, msp, text, xc, y, height, layer):
         """Centred text with a matching underline beneath it, mimicking
         the reference sheet's 'BORE HOLE AT <ID>' captions."""
@@ -112,27 +152,27 @@ class BoreLogDxfBuilder:
 
     def _draw_hatched_column(self, msp, bh: BoreholeRecord, x0: float, top_col_y: float,
                               used_categories: set) -> float:
-        """Draws the column outline + all soil/rock hatches for one
-        borehole. Returns the column's bottom y-coordinate."""
+        """Draws the column outline + soil description text for one
+        borehole (hatching replaced with text labels). Returns the
+        column's bottom y-coordinate."""
         bottom_col_y = self._depth_to_y(bh.total_depth)
         msp.add_lwpolyline(
             [(x0, top_col_y), (x0 + self.col_w, top_col_y),
              (x0 + self.col_w, bottom_col_y), (x0, bottom_col_y), (x0, top_col_y)],
             dxfattribs={'layer': 'BOREHOLE-OUTLINE'})
 
+        xc = x0 + self.col_w / 2
         for layer in bh.layers:
             y_top = self._depth_to_y(layer.from_depth) if layer.from_depth > 0 else top_col_y
             y_bot = self._depth_to_y(layer.to_depth)
-            cat_key, style = classify_and_style(layer.description)
-            category_layer = _HATCH_LAYER_BY_CATEGORY.get(cat_key, 'BOREHOLE-HATCH-OVERBURDEN')
-            used_categories.add(style['label'])
-            poly_pts = [(x0, y_top), (x0 + self.col_w, y_top),
-                        (x0 + self.col_w, y_bot), (x0, y_bot)]
-            hatch = msp.add_hatch(dxfattribs={'layer': category_layer})
-            hatch.set_pattern_fill(style['pattern'], color=7, scale=style['scale'])
-            hatch.paths.add_polyline_path(poly_pts, is_closed=True)
             msp.add_line((x0, y_bot), (x0 + self.col_w, y_bot),
                           dxfattribs={'layer': 'BOREHOLE-OUTLINE'})
+            layer_thickness = abs(y_top - y_bot)
+            if layer.description:
+                # choose a text height that fits the cell, then word-wrap
+                txt_h = min(2.8, max(1.2, layer_thickness * 0.35))
+                self._draw_wrapped_text(msp, layer.description, xc,
+                                        y_top, y_bot, txt_h, 'BOREHOLE-TEXT')
         return bottom_col_y
 
     # -- per-style borehole drawing -----------------------------------------
@@ -149,12 +189,20 @@ class BoreLogDxfBuilder:
 
         bottom_col_y = self._draw_hatched_column(msp, bh, x0, top_col_y, used_categories)
 
+        # depth numbers on the left side at each layer boundary
+        self._add_text(msp, '0.00', x0 - 8, top_col_y, 1.8, 'BOREHOLE-TEXT',
+                        align=TextEntityAlignment.MIDDLE_RIGHT)
+        for layer in bh.layers:
+            y_bot = self._depth_to_y(layer.to_depth)
+            self._add_text(msp, f"{layer.to_depth:.2f}", x0 - 8, y_bot, 1.8,
+                            'BOREHOLE-TEXT', align=TextEntityAlignment.MIDDLE_RIGHT)
+
         # tick marks only - no per-tick text, matching the reference sheet
         for t in bh.tests:
             y = self._depth_to_y(t.depth)
             msp.add_line((x0 + self.col_w, y), (x0 + self.col_w + 2.5, y),
                           dxfattribs={'layer': 'BOREHOLE-TICKS'})
-            msp.add_line((x0 - 2.5, y), (x0, y), dxfattribs={'layer': 'BOREHOLE-TICKS'})
+            msp.add_line((x0 - 1.5, y), (x0, y), dxfattribs={'layer': 'BOREHOLE-TICKS'})
 
         label = f"BORE HOLE AT {bh.location}"
         self._add_underlined_label(msp, label, xc, bottom_col_y - 9, 2.6, 'BOREHOLE-LABEL')
@@ -186,11 +234,9 @@ class BoreLogDxfBuilder:
             self._add_text(msp, f"{layer.to_depth:.2f}", x0 - 3, y_bot, 2.2,
                             'BOREHOLE-TEXT', align=TextEntityAlignment.MIDDLE_RIGHT)
             y_top = self._depth_to_y(layer.from_depth) if layer.from_depth > 0 else top_col_y
-            mid_y = (y_top + y_bot) / 2
-            if (y_top - y_bot) > 8 and layer.description:
-                self._add_text(msp, layer.description, xc, mid_y, 1.7,
-                                'BOREHOLE-TEXT', align=TextEntityAlignment.MIDDLE_CENTER,
-                                rotation=90)
+            if layer.description:
+                self._draw_wrapped_text(msp, layer.description, xc,
+                                        y_top, y_bot, 1.7, 'BOREHOLE-TEXT')
 
         self._add_text(msp, '0.00', x0 - 3, top_col_y, 2.2, 'BOREHOLE-TEXT',
                         align=TextEntityAlignment.MIDDLE_RIGHT)
@@ -268,30 +314,6 @@ class BoreLogDxfBuilder:
         if self.project_line:
             self._add_text(msp, self.project_line, total_width / 2, top_y + 10, 3.2,
                             'BOREHOLE-HEADER', align=TextEntityAlignment.MIDDLE_CENTER)
-
-        # legend - only categories actually used, and only for the
-        # detailed style (the schematic sheet deliberately stays bare,
-        # same as the reference)
-        if self.style == "detailed":
-            legend_x = self.x_start
-            legend_y = bottom_y + 8
-            self._add_text(msp, 'LEGEND:', legend_x, legend_y, 3.0, 'BOREHOLE-HEADER')
-            lx = legend_x + 22
-            seen = set()
-            for cat_key, style in HATCH_STYLE.items():
-                if style['label'] not in used_categories or style['label'] in seen:
-                    continue
-                seen.add(style['label'])
-                box = [(lx, legend_y - 1), (lx + 8, legend_y - 1),
-                       (lx + 8, legend_y + 4), (lx, legend_y + 4)]
-                category_layer = _HATCH_LAYER_BY_CATEGORY.get(cat_key, 'BOREHOLE-HATCH-OVERBURDEN')
-                hatch = msp.add_hatch(dxfattribs={'layer': category_layer})
-                hatch.set_pattern_fill(style['pattern'], color=7, scale=style['scale'])
-                hatch.paths.add_polyline_path(box, is_closed=True)
-                msp.add_lwpolyline(box + [box[0]], dxfattribs={'layer': 'BOREHOLE-OUTLINE'})
-                self._add_text(msp, style['label'], lx + 10, legend_y + 1.5, 2.4,
-                                'BOREHOLE-HEADER', align=TextEntityAlignment.MIDDLE_LEFT)
-                lx += 55
 
         return doc
 
