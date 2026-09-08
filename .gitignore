@@ -37,3 +37,24 @@ Desktop.ini
 
 # Logs & local runtime output
 *.log
+
+# Generated demo/test output (GAD generator CLI, tests, previews)
+/gad_test_output/
+
+# Secrets / service-account keys (never commit)
+secrets/
+
+# Freebuff/zcode local session state
+.freebuff/
+.zcode/
+
+# Scratch/preview artifacts (underscore-prefixed)
+/_*.txt
+/_*.py
+/_mockups*/
+
+# Machine-suffixed editor duplicates
+*-DESKTOP-*.py
+
+# Service-account keys anywhere (never commit)
+bes_service_account.json

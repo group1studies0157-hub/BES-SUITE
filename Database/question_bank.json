@@ -317,7 +317,7 @@
         "explanation": "Standard BG concrete sleeper dimensions are 2750 mm (length) × 250 mm (width) × 210 mm (depth) as per IRPWM specifications.",
         "difficulty": "medium",
         "source": "IRPWM Para — Sleeper Standards",
-        "attempt_count": 1
+        "attempt_count": 2
       },
       {
         "question": "The schedule of inspection by ADEN for normal track is ___",
@@ -345,7 +345,7 @@
         "explanation": "The standard gauge for Broad Gauge in Indian Railways is 1676 mm (5 ft 6 inches), measured between inner faces of rail heads.",
         "difficulty": "easy",
         "source": "IRPWM Para 101 — Track Standards",
-        "attempt_count": 1
+        "attempt_count": 2
       },
       {
         "question": "As per IRPWM, the maximum permissible speed on a track with maximum unevenness is ___",
@@ -457,7 +457,7 @@
         "explanation": "The maximum permissible cant deficiency on BG track for passenger trains is 75 mm as per IRPWM curve standards.",
         "difficulty": "hard",
         "source": "IRPWM — Curve Standards",
-        "attempt_count": 1
+        "attempt_count": 2
       },
       {
         "question": "Track geometry parameters measured by MTRC (Mechanical Track Recording Car) include ___",
@@ -471,7 +471,7 @@
         "explanation": "MTRC measures all key track geometry parameters: gauge, alignment, cross-level (cant), longitudinal unevenness, and twist.",
         "difficulty": "medium",
         "source": "IRPWM — Track Maintenance Machines",
-        "attempt_count": 0
+        "attempt_count": 1
       },
       {
         "question": "The minimum radius of curve permissible on BG main line in Indian Railways is ___",
@@ -485,7 +485,7 @@
         "explanation": "The absolute minimum radius of curve on BG main line is 175 m (special circumstances), while 200 m is the minimum for group A & B routes.",
         "difficulty": "hard",
         "source": "IRPWM — Curve Standards",
-        "attempt_count": 1
+        "attempt_count": 2
       },
       {
         "question": "Rails are classified by ___",
@@ -499,7 +499,7 @@
         "explanation": "Rails are classified by their weight per running metre (e.g., 60 kg/m, 52 kg/m, 90 R) which indicates their cross-sectional properties.",
         "difficulty": "easy",
         "source": "IRPWM — Rail Standards",
-        "attempt_count": 1
+        "attempt_count": 2
       },
       {
         "question": "The purpose of ballast in a railway track is ___",
@@ -569,7 +569,7 @@
         "explanation": "Track inspection by motor trolley must be done at not more than 30 kmph to allow proper observation of track condition.",
         "difficulty": "medium",
         "source": "IRPWM — Track Inspection",
-        "attempt_count": 1
+        "attempt_count": 2
       },
       {
         "question": "Alumino Thermit (AT) welding is used for ___",
@@ -583,7 +583,7 @@
         "explanation": "AT welding (Thermit welding) is primarily used for closure welds in LWR/CWR and for in-situ repair welds at site due to its portability.",
         "difficulty": "medium",
         "source": "IRPWM / SOD — AT Welding",
-        "attempt_count": 0
+        "attempt_count": 1
       },
       {
         "question": "The buffer rails in LWR (Long Welded Rail) are provided to ___",
@@ -597,7 +597,7 @@
         "explanation": "Buffer rails (joggled fish plate zone) at LWR ends are provided to absorb the thermal movement that cannot be accommodated within the LWR breathing length.",
         "difficulty": "hard",
         "source": "IRPWM / LWR Manual",
-        "attempt_count": 1
+        "attempt_count": 2
       },
       {
         "question": "The maximum permissible temperature variation for laying LWR is ___",
@@ -628,6 +628,306 @@
         "pyq_year": null,
         "question": "What is the primary purpose of the Bridge Rules (in SI Units) issued by the Ministry of Railways?",
         "source": "Bridge Rules, Title Page",
+        "topic": "IRPWM",
+        "attempt_count": 1
+      },
+      {
+        "correct": 1,
+        "created": "2026-07-16",
+        "difficulty": "easy",
+        "explanation": "The title page states 'ADOPTED –1941'.",
+        "options": [
+          "1964",
+          "1941",
+          "1989",
+          "2008"
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "When were the Indian Railway Bridge Rules (in SI Units) first adopted?",
+        "source": "Bridge Rules Title Page",
+        "topic": "IRPWM",
+        "attempt_count": 1
+      },
+      {
+        "correct": 3,
+        "created": "2026-07-16",
+        "difficulty": "easy",
+        "explanation": "Sections 2.2, 2.3, and 2.4 explicitly list Dead load, Live load, and Dynamic effect respectively. Soil settlement load is not listed as a primary load in the contents.",
+        "options": [
+          "Dead load",
+          "Live load",
+          "Dynamic effect",
+          "Soil settlement load"
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "Which of the following is NOT listed as a primary load to be taken into account for bridge design as per the Bridge Rules?",
+        "source": "Bridge Rules Section 2.1, 2.2, 2.3, 2.4",
+        "topic": "IRPWM",
+        "attempt_count": 1
+      },
+      {
+        "correct": 2,
+        "created": "2026-07-16",
+        "difficulty": "easy",
+        "explanation": "The title page states 'RULES SPECIFYING THE LOADS FOR DESIGN OF SUPER-STRUCTURE AND SUB-STRUCTURE OF BRIDGES'.",
+        "options": [
+          "Super-structure only",
+          "Sub-structure only",
+          "Super-structure and Sub-structure",
+          "Track components only"
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "The Indian Railway Bridge Rules specify loads for the design of which components?",
+        "source": "Bridge Rules Title Page",
+        "topic": "IRPWM",
+        "attempt_count": 1
+      },
+      {
+        "correct": 1,
+        "created": "2026-07-16",
+        "difficulty": "easy",
+        "explanation": "Section 2.15 and Appendix-X refer to 'Load due to Plasser’s Quick Relay System (PQRS)'.",
+        "options": [
+          "Permanent Way Rail System",
+          "Plasser's Quick Relay System",
+          "Pre-stressed Quality Rail Support",
+          "Public Quota Rail Service"
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "What does 'PQRS' stand for in the context of loads mentioned in the Bridge Rules?",
+        "source": "Bridge Rules Section 2.15, Appendix-X",
+        "topic": "IRPWM",
+        "attempt_count": 1
+      },
+      {
+        "correct": 1,
+        "created": "2026-07-16",
+        "difficulty": "medium",
+        "explanation": "The Contents list '2.5 Forces due to curvature and eccentricity of track'.",
+        "options": [
+          "2.3",
+          "2.5",
+          "2.8",
+          "2.11"
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "As per the Bridge Rules, which section deals with 'Forces due to curvature and eccentricity of track'?",
+        "source": "Bridge Rules Contents, Section 2.5",
+        "topic": "IRPWM",
+        "attempt_count": 1
+      },
+      {
+        "correct": 2,
+        "created": "2026-07-16",
+        "difficulty": "medium",
+        "explanation": "Appendix-I (Sheet 1, 2, 3) describes '762mm Gauge 'H' Class Loading', '762mm Gauge 'A' Class Loading', and '762mm Gauge 'B' Class Loading'.",
+        "options": [
+          "Broad Gauge (BG)",
+          "Metre Gauge (MG)",
+          "762mm Gauge",
+          "Narrow Gauge (NG)"
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "Appendix-I of the Bridge Rules primarily details loading for which gauge?",
+        "source": "Bridge Rules Appendix-I",
+        "topic": "IRPWM",
+        "attempt_count": 1
+      },
+      {
+        "correct": 1,
+        "created": "2026-07-16",
+        "difficulty": "medium",
+        "explanation": "Appendix-III is titled 'Equivalent Uniformly Distributed Loads (EUDL) in Kilo Newtons (Tonnes) on each track, and Coefficient of Dynamic Augment (CDA) for MG'.",
+        "options": [
+          "Appendix-II",
+          "Appendix-III",
+          "Appendix-IV",
+          "Appendix-V"
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "Which Appendix provides the Equivalent Uniformly Distributed Loads (EUDL) and Coefficient of Dynamic Augment (CDA) values for Metre Gauge (MG) bridges?",
+        "source": "Bridge Rules Appendix-III",
+        "topic": "IRPWM",
+        "attempt_count": 1
+      },
+      {
+        "correct": 2,
+        "created": "2026-07-16",
+        "difficulty": "medium",
+        "explanation": "The Contents list '2.8 Longitudinal forces'.",
+        "options": [
+          "2.6",
+          "2.7",
+          "2.8",
+          "2.9"
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "Which section of the Bridge Rules addresses 'Longitudinal forces'?",
+        "source": "Bridge Rules Contents, Section 2.8",
+        "topic": "IRPWM",
+        "attempt_count": 1
+      },
+      {
+        "correct": 2,
+        "created": "2026-07-16",
+        "difficulty": "hard",
+        "explanation": "Appendix-VII is titled 'EUDL in tonnes on each track and Impact Factors for BG Bridges for Brought Gauge Standard Loadings (BGML and BGBL) – 1926'.",
+        "options": [
+          "RBG-1975",
+          "Heavy Mineral Loading",
+          "BGML and BGBL-1926",
+          "Modified Metre Gauge Loading-1988"
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "Appendix-VII of the Bridge Rules provides EUDL and Impact Factors for which Broad Gauge Standard Loadings?",
+        "source": "Bridge Rules Appendix-VII",
+        "topic": "IRPWM",
+        "attempt_count": 1
+      },
+      {
+        "correct": 3,
+        "created": "2026-07-16",
+        "difficulty": "hard",
+        "explanation": "The title page states 'Incorporating Correction Slips upto ACS 53 dtd. 26.12.2024'.",
+        "options": [
+          "1989",
+          "2008",
+          "2014",
+          "ACS 53 dtd. 26.12.2024"
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "The Bridge Rules (in SI Units) incorporate Correction Slips up to which date?",
+        "source": "Bridge Rules Title Page",
+        "topic": "IRPWM",
+        "attempt_count": 1
+      },
+      {
+        "correct": 2,
+        "created": "2026-07-17",
+        "difficulty": "easy",
+        "explanation": "The Bridge Rules were 'ADOPTED –1941' as stated on the title page of the document.",
+        "options": [
+          "1964",
+          "1989",
+          "1941",
+          "2008"
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "As per the Bridge Rules (in SI Units) issued by the Ministry of Railways, in which year were these rules first adopted?",
+        "source": "Bridge Rules (in SI Units), Title Page",
+        "topic": "IRPWM"
+      },
+      {
+        "correct": 3,
+        "created": "2026-07-17",
+        "difficulty": "easy",
+        "explanation": "The table of contents (Sl. No. 2.1 to 2.15) lists Dead load, Live load, Dynamic effect, Forces due to curvature and eccentricity of track, Temperature effect, Frictional resistance of expansion bearings, Longitudinal forces, Racking force, Forces on parapets, Wind pressure effect, Forces and effects due to earthquake, Erection forces and effects, Derailment loads, and Load due to Plasser’s Quick Relay System (PQRS). Soil pressure is not explicitly listed as a top-level item.",
+        "options": [
+          "Dead load",
+          "Live load",
+          "Forces due to curvature and eccentricity of track",
+          "Soil pressure"
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "Which of the following is NOT explicitly listed as a primary load or effect to be taken into account for bridge design in the main contents of the Bridge Rules?",
+        "source": "Bridge Rules (in SI Units), Contents Sl. No. 2.1 - 2.15",
+        "topic": "IRPWM"
+      },
+      {
+        "correct": 2,
+        "created": "2026-07-17",
+        "difficulty": "medium",
+        "explanation": "Appendix-III describes 'Equivalent Uniformly Distributed Loads (EUDL) in Kilo Newtons (Tonnes) on each track, and Coefficient of Dynamic Augment (CDA) for MG', indicating CDA is used to augment live loads.",
+        "options": [
+          "To account for the static weight of the bridge structure.",
+          "To factor in the effect of wind pressure on the bridge.",
+          "To amplify live load effects due to dynamic action of moving trains.",
+          "To calculate the temperature-induced stresses in the bridge components."
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "What is the primary purpose of the 'Coefficient of Dynamic Augment (CDA)' as referred to in the Bridge Rules for bridge design?",
+        "source": "Bridge Rules (in SI Units), Appendix-III",
+        "topic": "IRPWM"
+      },
+      {
+        "correct": 1,
+        "created": "2026-07-17",
+        "difficulty": "medium",
+        "explanation": "The title page states 'FIRST REVISION - 1964'.",
+        "options": [
+          "1941",
+          "1964",
+          "1989",
+          "2014"
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "The First Revision of the Bridge Rules (in SI Units) was implemented in which year?",
+        "source": "Bridge Rules (in SI Units), Title Page",
+        "topic": "IRPWM"
+      },
+      {
+        "correct": 2,
+        "created": "2026-07-17",
+        "difficulty": "easy",
+        "explanation": "The title page clearly states: 'RULES SPECIFYING THE LOADS FOR DESIGN OF SUPER-STRUCTURE AND SUB-STRUCTURE OF BRIDGES'.",
+        "options": [
+          "Only the superstructure of bridges.",
+          "Only the substructure of bridges.",
+          "Both the superstructure and substructure of bridges.",
+          "Only the track components laid on bridges."
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "According to the Bridge Rules, for which main components do these rules specify the loads for design?",
+        "source": "Bridge Rules (in SI Units), Title Page",
+        "topic": "IRPWM"
+      },
+      {
+        "correct": 2,
+        "created": "2026-07-17",
+        "difficulty": "hard",
+        "explanation": "Appendix-XI (Sheets 1 & 2) is titled 'Loading diagrams for Revised Broad Gauge Loading (RBG)-1975'.",
+        "options": [
+          "Broad Gauge Standard Loadings (BGML and BGBL) - 1926",
+          "Heavy Mineral Loading",
+          "Revised Broad Gauge Loading (RBG) - 1975",
+          "Modified Meter Gauge Loading - 1988"
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "Appendix-XI (Sheets 1 & 2) of the Bridge Rules provides loading diagrams for which specific Broad Gauge loading standard?",
+        "source": "Bridge Rules (in SI Units), Appendix-XI",
+        "topic": "IRPWM"
+      },
+      {
+        "correct": 2,
+        "created": "2026-07-17",
+        "difficulty": "medium",
+        "explanation": "Sl. No. 2.7 in the Contents is explicitly titled 'Frictional resistance of expansion bearings'.",
+        "options": [
+          "Racking force",
+          "Longitudinal force",
+          "Frictional resistance of expansion bearings",
+          "Derailment load"
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "Which specific force is addressed in the Bridge Rules to account for the resistance encountered at expansion bearings?",
+        "source": "Bridge Rules (in SI Units), Contents Sl. No. 2.7",
         "topic": "IRPWM"
       }
     ],

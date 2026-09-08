@@ -80,6 +80,7 @@ RE_SOIL_HILLY  = _c(r"Hilly\s*Soil|Plateau\s*&?\s*Barren", re.I)
 
 # ─── Doubling specific patterns ────────────────────────────────────────────
 RE_BETWEEN_STN = _c(r"Between\s*(?:Stations?|Stns?)[:\s]+(.+?)(?:\n|$)")
+RE_IN_BETWEEN  = _c(r"IN\s*BETWEEN[:\s]+(.+?)(?:\n|\.|$)")
 RE_DIVISION    = _c(r"Division[:\s]+(SC|BZA|HYB|GTL|GNT|NED|MAS)")
 RE_BRIDGE_CAT  = _c(r"(Minor\s*Bridge|Major\s*Bridge|Bridge|Culvert)")
 RE_N_SPANS_EXG = _c(r"(?:No\.?\s*of\s*Spans?|Spans?)[:\s]*(?:Existing)[:\s]+([\d]+)")
@@ -97,6 +98,16 @@ RE_US_OHFL     = _c(r"(?:U/S\s*Bridge|Upstream)[:\s]*O\.?H\.?F\.?L\.?[:\s]+([\d]
 RE_EXG_SPAN_DESC = _c(r"Existing\s*(?:Span\s*)?Description[:\s]+(.+?)(?:\n|$)")
 RE_PROP_SPAN_DESC= _c(r"(?:Proposed\s*(?:Span\s*)?Description)[:\s]+(.+?)(?:\n|$)")
 
+# ─── Generic patterns (no Existing/Proposed keyword needed — colour picks the side)
+RE_N_SPANS   = _c(r"(?:No\.?\s*of\s*Spans?|Spans?)[:\s]+([\d]+)")
+RE_LWY       = _c(r"(?:Linear\s*Waterway|L(?:WY)?)[:\s]+([\d]+(?:\.[\d]+)?)\s*m")
+RE_RL        = _c(r"(?:Rail\s*Level|RL)[:\s]+([\d]+(?:\.[\d]+)?)")
+RE_FL        = _c(r"(?:Formation\s*Level|FL)[:\s]+([\d]+(?:\.[\d]+)?)")
+RE_BOS       = _c(r"(?:Bottom\s*of\s*Slab|BOS)[:\s]+([\d]+(?:\.[\d]+)?)")
+RE_SPAN_DESC = _c(r"(?:Span\s*)?Description[:\s]+(.+?)(?:\n|$)")
+RE_TBL_PROP  = _c(r"TR?A?CK\s*DETAILS\s*[:\-]?\s*PRO", re.I)
+RE_TBL_EXG   = _c(r"TR?A?CK\s*DETAILS\s*\(?\s*EXS?T", re.I)
+
 # ─── Span types ────────────────────────────────────────────────────────────
 SPAN_TYPE_MAP = [
     (re.compile(r"RCC\s*Box", re.I),         "RCC Box"),
@@ -107,9 +118,12 @@ SPAN_TYPE_MAP = [
     (re.compile(r"Plate\s*Girder", re.I),    "Plate Girder"),
     (re.compile(r"Pipe\s*Culvert", re.I),    "Pipe Culvert"),
     (re.compile(r"Open\s*Web", re.I),        "Open Web Girder"),
+    (re.compile(r"\bS\.?T\.?C\.?\b|Steel\s*Trough", re.I), "STC"),
 ]
 
 STRUCTURE_MAP = [
+    (re.compile(r"PSC\s*SLAB", re.I),        "PSC SLAB"),
+    (re.compile(r"PSC\s*GIRDER", re.I),      "PSC GIRDER"),
     (re.compile(r"RCC\s*BOX", re.I),         "RCC BOX"),
     (re.compile(r"ARCH", re.I),              "ARCH"),
     (re.compile(r"SLAB\s*CULVERT", re.I),    "SLAB CULVERT"),
@@ -234,6 +248,154 @@ def _preprocess_image(img) -> "Image":
     return combined
 
 
+def _is_red(r, g, b) -> bool:
+    return r > 130 and g < 110 and b < 110
+
+
+def _mask_image(img, red: bool):
+    from PIL import ImageChops
+    rgb = img.convert("RGB")
+    w, h = rgb.size
+    if w < 1800:
+        s = max(2, 1800 // max(w, 1))
+        rgb = rgb.resize((w * s, h * s), Image.LANCZOS)
+    r, g, b = rgb.split()
+    if red:
+        px = ImageChops.subtract(r, ImageChops.lighter(g, b))
+    else:
+        dark = ImageChops.darker(ImageChops.darker(r, g), b)
+        notred = ImageChops.invert(ImageChops.subtract(r, ImageChops.lighter(g, b)))
+        px = ImageChops.multiply(ImageChops.invert(dark), notred)
+        px = ImageChops.invert(px)
+    px = ImageEnhance.Contrast(px).enhance(3.0)
+    return px.filter(ImageFilter.SHARPEN)
+
+
+def _ocr_colored_image(img) -> tuple:
+    if not HAS_TESSERACT:
+        return "", ""
+    blk = pytesseract.image_to_string(_mask_image(img, red=False), config=TESSERACT_CONFIG)
+    red = pytesseract.image_to_string(_mask_image(img, red=True), config=TESSERACT_CONFIG)
+    return blk, red
+
+
+def _fitz_split_by_color(path: str) -> tuple:
+    blk, red = [], []
+    doc = fitz.open(path)
+    for page in doc:
+        d = page.get_text("dict")
+        for blk_ in d.get("blocks", []):
+            for ln in blk_.get("lines", []):
+                line_txt, line_red = [], False
+                for sp in ln.get("spans", []):
+                    c = sp.get("color", 0)
+                    r, g, b = (c >> 16) & 255, (c >> 8) & 255, c & 255
+                    line_txt.append(sp.get("text", ""))
+                    if _is_red(r, g, b):
+                        line_red = True
+                txt = "".join(line_txt)
+                if not txt.strip():
+                    continue
+                (red if line_red else blk).append(txt)
+    doc.close()
+    return "\n".join(blk), "\n".join(red)
+
+
+def _title_block_clip(w, h):
+    """Bottom-right corner region of a sheet — conventional title-block spot."""
+    return (0.55 * w, 0.68 * h, w, h)
+
+
+def extract_title_block_text(file_path: str) -> str:
+    """
+    Pulls text from just the bottom-right corner of each page (the
+    conventional title-block location on a Railway GAD/site-plan sheet),
+    rather than the whole sheet — keeps "IN BETWEEN <stations>" / span
+    description matches from colliding with unrelated body text.
+    """
+    ext = Path(file_path).suffix.lower()
+    out = []
+    if ext == ".pdf" and HAS_PYMUPDF:
+        try:
+            doc = fitz.open(file_path)
+            for page in doc:
+                w, h = page.rect.width, page.rect.height
+                clip = fitz.Rect(*_title_block_clip(w, h))
+                t = page.get_text("text", clip=clip)
+                if t.strip():
+                    out.append(t)
+            doc.close()
+            if out:
+                return "\n".join(out)
+        except Exception:
+            pass
+    if ext == ".pdf" and HAS_PDFPLUMBER:
+        try:
+            with pdfplumber.open(file_path) as pdf:
+                for page in pdf.pages:
+                    x0, top, x1, bottom = _title_block_clip(page.width, page.height)
+                    crop = page.within_bbox((x0, top, x1, bottom))
+                    t = crop.extract_text() or ""
+                    if t.strip():
+                        out.append(t)
+            if out:
+                return "\n".join(out)
+        except Exception:
+            pass
+    if ext == ".pdf" and HAS_PDF2IMAGE and HAS_TESSERACT:
+        try:
+            for img in convert_from_path(file_path, dpi=250, first_page=1, last_page=3):
+                w, h = img.size
+                x0, top, x1, bottom = _title_block_clip(w, h)
+                crop = img.crop((int(x0), int(top), int(x1), int(bottom)))
+                t = pytesseract.image_to_string(crop, config=TESSERACT_CONFIG)
+                if t.strip():
+                    out.append(t)
+            return "\n".join(out)
+        except Exception:
+            pass
+    if ext in (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp") and HAS_TESSERACT:
+        try:
+            img = Image.open(file_path)
+            w, h = img.size
+            x0, top, x1, bottom = _title_block_clip(w, h)
+            crop = img.crop((int(x0), int(top), int(x1), int(bottom)))
+            return pytesseract.image_to_string(crop, config=TESSERACT_CONFIG)
+        except Exception:
+            pass
+    return ""
+
+
+def extract_text_colored(file_path: str) -> tuple:
+    """Split extracted text into (black_text, red_text) streams.
+    RED = proposed line / new bridge details. BLACK = existing line / exg bridge
+    details. Same convention applies to elevation-details tables."""
+    ext = Path(file_path).suffix.lower()
+    if ext == ".pdf" and HAS_PYMUPDF:
+        try:
+            blk, red = _fitz_split_by_color(file_path)
+            if blk.strip() or red.strip():
+                return blk, red
+        except Exception:
+            pass
+    if ext == ".pdf" and HAS_PDF2IMAGE and HAS_TESSERACT:
+        try:
+            blk, red = [], []
+            for img in convert_from_path(file_path, dpi=250, first_page=1, last_page=3):
+                b, r = _ocr_colored_image(img)
+                blk.append(b); red.append(r)
+            return "\n".join(blk), "\n".join(red)
+        except Exception:
+            pass
+    if ext in (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp") and HAS_TESSERACT:
+        try:
+            return _ocr_colored_image(Image.open(file_path))
+        except Exception:
+            pass
+    t = extract_text(file_path)
+    return t, ""
+
+
 def extract_text(file_path: str) -> str:
     """Main entry point: detect file type and extract text."""
     ext = Path(file_path).suffix.lower()
@@ -318,49 +480,68 @@ def autofill_newline(text: str) -> dict:
     return fields
 
 
-def autofill_doubling(text: str) -> dict:
+def autofill_doubling(text: str, blk: str = None, red: str = None, title_block: str = None) -> dict:
     """
-    Extract all Doubling form field values from OCR/extracted text.
-    Returns a dict with field_name -> value (None if not found).
+    Extract all Doubling form field values.
+    `text` = full combined text (colour-agnostic fields: bridge_no, section...).
+    `blk`  = BLACK-only stream  -> EXISTING line / EXG bridge details.
+    `red`  = RED-only stream    -> PROPOSED line / new bridge details.
+    Same colour convention applies to elevation-details tables.
+    `title_block` = text from just the bottom-right title-block corner of the
+    sheet — used for Between Stations ("IN BETWEEN <stns>") and as the first
+    place checked for span-type keywords (title block / elevation description
+    usually names the structure type before the coloured tables do).
+    If blk/red are not supplied, falls back to keyword-based Existing/Proposed
+    regexes on the combined text (legacy behaviour).
     """
     fields = {}
+    e = blk if blk is not None else text
+    p = red if red is not None else text
+    have_colour = blk is not None or red is not None
+    tb = title_block or ""
 
     fields["bridge_no"]      = _match(RE_BRIDGE_NO, text)
     fields["section"]        = _match(RE_SECTION, text)
     fields["chainage"]       = _match(RE_CHAINAGE, text)
-    fields["between_stns"]   = _match(RE_BETWEEN_STN, text)
+    fields["between_stns"]   = (_match(RE_IN_BETWEEN, tb) or _match(RE_IN_BETWEEN, text)
+                                 or _match(RE_BETWEEN_STN, text))
     fields["division"]       = _match(RE_DIVISION, text)
     fields["bridge_cat"]     = _match(RE_BRIDGE_CAT, text)
-    fields["exg_span_desc"]  = _match(RE_EXG_SPAN_DESC, text)
-    fields["prop_span_desc"] = _match(RE_PROP_SPAN_DESC, text)
 
-    # Spans
-    n_exg = _match(RE_N_SPANS_EXG, text) or _match(RE_N_SPANS_EXG2, text)
-    fields["n_spans_exg"]   = n_exg
-    fields["n_spans_prop"]  = _match(RE_N_SPANS_PRO, text)
+    fields["exg_span_desc"]  = _match(RE_EXG_SPAN_DESC, text) or (_match(RE_SPAN_DESC, e) if have_colour else None)
+    fields["prop_span_desc"] = _match(RE_PROP_SPAN_DESC, text) or (_match(RE_SPAN_DESC, p) if have_colour else None)
 
-    # Existing bridge measurements
-    fields["l_exg"]         = _match(RE_LWY_EXG, text)
-    fields["rl_exg"]        = _match(RE_RL_EXG, text)
-    fields["fl_exg"]        = _match(RE_FL_EXG, text)
-    fields["bos_exg"]       = _match(RE_BOS_EXG, text)
-    fields["ohfl"]          = _match(RE_OHFL, text)
-    fields["bl"]            = _match(RE_BED_LEVEL, text)
+    fields["n_spans_exg"]  = _match(RE_N_SPANS_EXG, text) or _match(RE_N_SPANS_EXG2, text) or (_match(RE_N_SPANS, e) if have_colour else None)
+    fields["n_spans_prop"] = _match(RE_N_SPANS_PRO, text) or (_match(RE_N_SPANS, p) if have_colour else None)
 
-    # Proposed bridge measurements
-    fields["l_prop"]        = _match(RE_LWY_PROP, text)
-    fields["rl_prop"]       = _match(RE_RL_PROP, text)
-    fields["fl_prop"]       = _match(RE_FL_PROP, text)
-    fields["bos_prop"]      = _match(RE_BOS_PROP, text)
-    fields["us_ohfl"]       = _match(RE_US_OHFL, text)
+    fields["l_exg"]   = _match(RE_LWY_EXG, text) or (_match(RE_LWY, e) if have_colour else None)
+    fields["rl_exg"]  = _match(RE_RL_EXG, text) or (_match(RE_RL, e) if have_colour else None)
+    fields["fl_exg"]  = _match(RE_FL_EXG, text) or (_match(RE_FL, e) if have_colour else None)
+    fields["bos_exg"] = _match(RE_BOS_EXG, text) or (_match(RE_BOS, e) if have_colour else None)
+    fields["ohfl"]    = _match(RE_OHFL, e if have_colour else text) or (_match(RE_OHFL, text) if have_colour else None)
+    fields["bl"]      = _match(RE_BED_LEVEL, e if have_colour else text) or (_match(RE_BED_LEVEL, text) if have_colour else None)
 
-    # Combo: span types
-    fields["_span_type_exg_raw"] = _detect_span_type(text, ["RCC Box", "Arch Bridge", "RCC Slab",
-                                    "PSC Girder", "Steel Girder", "Plate Girder",
-                                    "Pipe Culvert", "Open Web Girder"])
-    fields["_span_type_prop_raw"] = fields["_span_type_exg_raw"]  # often same doc
+    fields["l_prop"]   = _match(RE_LWY_PROP, text) or (_match(RE_LWY, p) if have_colour else None)
+    fields["rl_prop"]  = _match(RE_RL_PROP, text) or (_match(RE_RL, p) if have_colour else None)
+    fields["fl_prop"]  = _match(RE_FL_PROP, text) or (_match(RE_FL, p) if have_colour else None)
+    fields["bos_prop"] = _match(RE_BOS_PROP, text) or (_match(RE_BOS, p) if have_colour else None)
+    fields["us_ohfl"]  = _match(RE_US_OHFL, text) or (_match(RE_OHFL, p) if have_colour else None)
+
+    exg_opts = ["RCC Box", "Arch Bridge", "RCC Slab", "PSC Girder", "Steel Girder",
+                "Plate Girder", "Pipe Culvert", "Open Web Girder", "STC"]
+    fields["_span_type_exg_raw"]  = (_detect_span_type(tb, exg_opts) or _detect_span_type(e, exg_opts))
+    fields["_span_type_prop_raw"] = (_detect_span_type(tb, exg_opts) or _detect_span_type(p, exg_opts)
+                                      if have_colour else fields["_span_type_exg_raw"])
 
     return fields
+
+
+def autofill_doubling_from_file(path: str) -> dict:
+    """One-shot: colour-split + title-block extraction, then autofill_doubling."""
+    text = extract_text(path)
+    blk, red = extract_text_colored(path)
+    title_block = extract_title_block_text(path)
+    return autofill_doubling(text, blk, red, title_block)
 
 
 def _get_soil_index(text: str) -> Optional[int]:

@@ -65,7 +65,7 @@ LAYERS = {
 # AI PROMPT  — structured dimension extraction
 # ═══════════════════════════════════════════════════════════════════════════════
 
-EXTRACT_SYSTEM_PROMPT = """\
+EXTRACT_HEAD = """\
 You are a senior bridge engineer reading a GAD (General Arrangement Drawing).
 Your job is to produce a STRUCTURED DIMENSION TABLE — not to describe the drawing.
 
@@ -85,7 +85,9 @@ Look for these exact phrase patterns (case-insensitive):
   "CROSS SECTION" or "SECTION"                     → section zone present
 
 RETURN THIS JSON STRUCTURE (include only zones actually present):
+"""
 
+EXTRACT_SCHEMA = """\
 {
   "drawingTitle": "full title string from drawing",
   "bridgeNo":     "bridge number/ID if shown",
@@ -185,9 +187,96 @@ RETURN THIS JSON STRUCTURE (include only zones actually present):
     "warnings":                []
   }
 }
+"""
 
+EXTRACT_IMPORTANT = """\
 IMPORTANT: Only include keys for zones and sections actually visible in the drawing.
 Read every number you can see. Do not invent or estimate any value.
+"""
+
+# The original single-shot extraction prompt (unchanged content, reassembled
+# from the shared schema block above).
+_OCR_RULES = """\
+OCR QUALITY RULES (unclear, faded, multi-coloured or noisy scans):
+- Mentally strip colour: hatchings, watermarks and coloured dimension lines
+  may overlap the text — separate text by letter shape, not by colour.
+- Reconstruct broken/faint digits by pattern recognition: match stroke
+  shapes and cross-check against neighbouring values in the same chain and
+  repeated dimensions elsewhere on the sheet. Common confusions in poor
+  scans: 3↔8, 5↔6, 1↔7, 4↔9, 0↔6.
+- Read rotated, vertical and sloped dimension text as well as tiny notes.
+- Levels are typically 3-decimal metres (e.g. 100.000); dimensions are
+  3-4 digit millimetres — use this to sanity-check every reading.
+- Record null ONLY when a value is completely unreadable even in context —
+  otherwise give your best pattern-matched reading.
+
+"""
+
+EXTRACT_SYSTEM_PROMPT = (EXTRACT_HEAD.replace(
+    "CRITICAL RULES:", _OCR_RULES + "CRITICAL RULES:")
+    + EXTRACT_SCHEMA + EXTRACT_IMPORTANT)
+
+# Part-wise observation prompt — same output schema, but the AI is forced to
+# scan the sheet in the four fixed parts engineers use, recording observed
+# values part-wise (missing/null values are left for the user to fill).
+OBSERVE_SYSTEM_PROMPT = ("""\
+You are a senior bridge engineer performing ADVANCED OCR + pattern recognition
+on a GAD (General Arrangement Drawing). Scan the drawing PART BY PART, in this
+fixed order, and record EVERY value you can actually read — levels, heights,
+widths, chain members, thicknesses, slopes:
+
+  PART 1 — HALF ELEVATION & HALF SECTION (longitudinal view):
+      all RL levels (Rail, Formation, HFL, B.Lvl, C.C top/bottom, any other),
+      horizontal chain, vertical dims, span clear, approach slab, slab
+      thickness, abutment top/base/footing widths, slopes, notes.
+  PART 2 — HALF PLAN AT TOP & HALF PLAN AT BOTTOM (plan view):
+      transverse chain, longitudinal chain, offsets from CL, curtain/toe/drop
+      walls, stone flooring, flow direction, side labels, section cut label.
+  PART 3 — SECTIONAL VIEW (SECTION X-X and any abutment / return-wall sections):
+      transverse & vertical chains, slab thickness, slopes left/right,
+      abutment width, drop wall dim, abutment / return wall width tables.
+  PART 4 — SITE PLAN AND NOTES:
+      bridge number, bridge type, drawing title, scale, chainage, general notes.
+
+CRITICAL RULES:
+1. All dimensions in MILLIMETRES (metres × 1000); RLs stay in METRES.
+2. Read each number individually — never sum or skip chain members.
+3. Record ONLY values you can genuinely read; use null for anything not
+   legible. Never guess — missing values will be filled by the user by hand.
+
+RETURN THIS JSON STRUCTURE (include only zones actually present):
+""".replace("CRITICAL RULES:", _OCR_RULES + "CRITICAL RULES")
+ + EXTRACT_SCHEMA + EXTRACT_IMPORTANT)
+
+# Verifier agent prompt — a second, independent AI pass over the SAME drawing
+# that cross-checks the first extraction and is forced to re-scan for anything
+# missing before the observation Excel is generated.
+VERIFY_SYSTEM_PROMPT = """\
+You are a senior bridge engineer VERIFYING another engineer's dimension
+extraction of a GAD (General Arrangement Drawing). You are given the drawing
+AND the extracted dimension table (JSON). Do the following:
+
+1. VERIFY every value in the table against the drawing — levels, heights,
+   widths, chain members, thicknesses, slopes. Correct any misread value.
+2. RE-SCAN the drawing part by part (PART 1 elevation, PART 2 plan,
+   PART 3 sectional view, PART 4 site plan & notes) for values that are
+   null / missing from the table — add every value you can now read.
+3. CROSS-CHECK: dimension chains vs their totals, rail−bed RL difference vs
+   the vertical chain, slab thickness vs the section vertical chain,
+   abutment vs return-wall widths for symmetry.
+4. Keep dimensions in MILLIMETRES and RLs in METRES. Use null ONLY when a
+   value is genuinely not shown anywhere on the drawing — never guess.
+
+Return ONLY valid JSON — the SAME structure as the input table with your
+corrections applied, plus this extra top-level block:
+
+  "verification": {
+    "corrected":     [{"field": "...", "from": <old>, "to": <new>,
+                        "reason": "..."}],
+    "added":         [{"field": "...", "value": <new>, "part": 1}],
+    "still_missing": ["fields the user must measure/fill by hand"],
+    "warnings":      ["cross-check failures, e.g. chain sum mismatches"]
+  }
 """
 
 
@@ -307,6 +396,799 @@ def interpolate_missing(data: dict) -> list:
                     notes.append(f"{lbl} {k} ← {src[k]}mm (mirrored)")
 
     return notes
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# EXCEL INPUT — standard GAD data template + deterministic parser
+# ═══════════════════════════════════════════════════════════════════════════════
+# Alternative to AI Vision: the user fills a standard workbook with levels and
+# dimensions. The parser maps each sheet into the SAME canonical dimension-table
+# dict the AI prompt produces, so validation, interpolation, geometry building
+# and DXF writing are identical for both input routes. No API key is needed.
+# Blank cells mean "not shown" — interpolate_missing() fills them audibly.
+
+EXCEL_TEMPLATE = {
+    "General": [
+        ("Bridge No",     "BR-17"),
+        ("Bridge Type",   "RCC Slab"),
+        ("Drawing Title", "RCC SLAB BRIDGE — GENERAL ARRANGEMENT DRAWING"),
+        ("Scale",         "1:100"),
+        ("Chainage",      "KM 12/3-4"),
+        ("Zones",         "elevation, plan, section"),
+    ],
+    "Levels (m)": [
+        ("Rail Level",      100.000),
+        ("Formation Level", 99.540),
+        ("HFL",             99.250),
+        ("Bed Level",       97.650),
+        ("CC Top",          96.100),
+        ("CC Bottom",       95.600),
+    ],
+    "Elevation (mm)": [
+        ("Span Clear",                          4490),
+        ("Approach Slab",                       4350),
+        ("RCC Slab Thickness",                  ""),
+        ("Horizontal Chain (comma separated)",  "4350, 4490"),
+        ("Vertical Dims (comma separated)",     "150, 600, 600, 1000"),
+        ("Deck Slope",                          ""),
+        ("Approach Slope",                      "1:1½"),
+        ("Abutment Top Width",                  500),
+        ("Abutment Base Width",                 3235),
+        ("Abutment Height",                     ""),
+        ("Footing Width",                       1000),
+        ("CC Width",                            450),
+        ("CC Label",                            "C.C 1:3:6"),
+        ("Notes",                               "2x4.49m RCC Slab"),
+    ],
+    "Plan (mm)": [
+        ("Transverse Chain (comma separated)",  "1800, 4266, 1000, 4490, 1000, 4490, 1000"),
+        ("Longitudinal Chain (comma separated)","4880, 6100, 4880"),
+        ("Offset From CL (comma separated)",    "6100"),
+        ("Track CL Offset",                     6100),
+        ("Stone Flooring (yes/no)",             "yes"),
+        ("Flow Direction",                      "down"),
+        ("Left Label",                          "DKJ"),
+        ("Right Label",                         "MUGR"),
+        ("Section Cut Label",                   "X-X"),
+        ("Curtain Wall Dim",                    ""),
+        ("Toe Wall Dim",                        ""),
+        ("Drop Wall Dim",                       ""),
+        ("Notes",                               ""),
+    ],
+    "Section (mm)": [
+        ("Label",                               "SECTION X-X"),
+        ("Transverse Chain (comma separated)",  "750, 9150"),
+        ("Vertical Chain (comma separated)",    "610"),
+        ("RCC Slab Thickness",                  610),
+        ("Slope Left",                          "2:1"),
+        ("Slope Right",                         "1:8"),
+        ("Abutment Width",                      1676),
+        ("Drop Wall Dim",                       750),
+        ("Notes",                               "RCC Slab 610mm thick"),
+    ],
+    "Abutment & Return Wall (mm)": [
+        ("Abutment Top Width",                  500),
+        ("Abutment Base Width",                 3235),
+        ("Abutment Height Dims (comma separated)", "150, 600, 600, 1000"),
+        ("Abutment Footing",                    1000),
+        ("Abutment CC Label",                   "C.C 1:3:6"),
+        ("Return Wall Top Width",               450),
+        ("Return Wall Base Width",              3200),
+        ("Return Wall Height Dims (comma separated)", "450, 600, 600, 1000"),
+        ("Return Wall Footing",                 1000),
+        ("Return Wall CC Label",                "C.C 1:3:6"),
+    ],
+}
+
+
+def write_excel_template(path: str):
+    """Write the standard GAD data workbook (pre-filled with a worked example)."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    hdr_fill = PatternFill("solid", fgColor="1F3A5F")
+    hdr_font = Font(color="FFFFFF", bold=True, size=11)
+    for sheet, rows in EXCEL_TEMPLATE.items():
+        ws = wb.create_sheet(sheet[:31])
+        ws.column_dimensions["A"].width = 42
+        ws.column_dimensions["B"].width = 46
+        c = ws.cell(row=1, column=1, value="Parameter")
+        c.font, c.fill = hdr_font, hdr_fill
+        c = ws.cell(row=1, column=2, value="Value  (leave blank if not shown)")
+        c.font, c.fill = hdr_font, hdr_fill
+        c.alignment = Alignment(wrap_text=True)
+        for r, (param, example) in enumerate(rows, start=2):
+            ws.cell(row=r, column=1, value=param)
+            cell = ws.cell(row=r, column=2, value=example)
+            cell.alignment = Alignment(wrap_text=True)
+        ws.freeze_panes = "A2"
+    wb.save(path)
+
+
+def _xl_norm(s):
+    """Normalise a sheet/parameter name: lowercase, collapse whitespace,
+    drop unit hints so 'Span Clear (mm)' and 'span clear' match."""
+    k = str(s if s is not None else "").lower()
+    for junk in ("(mm, comma separated)", "(comma separated)",
+                 "(mm)", "(m)", "(yes/no)"):
+        k = k.replace(junk, "")
+    return " ".join(k.split())
+
+
+def _xl_num(raw):
+    """Coerce a cell to int/float, or None. Accepts '4490', 4490.0, '4,490'."""
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, (int, float)):
+        return raw
+    try:
+        f = float(str(raw).replace(",", "").strip())
+        return int(f) if f == int(f) else f
+    except (ValueError, TypeError):
+        return None
+
+
+def _xl_chain(raw):
+    """Parse a comma/semicolon/space-separated chain string → [floats]."""
+    if raw is None or raw == "":
+        return []
+    if isinstance(raw, (int, float)):
+        return [float(raw)]
+    parts = [p for p in str(raw).replace(";", ",").replace("\n", ",").split(",")]
+    out = []
+    for p in parts:
+        v = _xl_num(p)
+        if v is not None:
+            out.append(v)
+    return out
+
+
+def _xl_bool(raw):
+    if isinstance(raw, bool):
+        return raw
+    return str(raw or "").strip().lower() in ("yes", "y", "true", "1")
+
+
+def _xl_read(path: str):
+    """Yield (sheet_name, rows) for .xlsx (openpyxl) / .xls (xlrd)."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".xls":
+        import xlrd
+        book = xlrd.open_workbook(path)
+        for ws in book.sheets():
+            rows = [ws.row_values(i) for i in range(ws.nrows)]
+            yield ws.name, rows
+    else:
+        import openpyxl
+        wb = openpyxl.load_workbook(path, data_only=True)
+        for ws in wb.worksheets:
+            rows = [list(r) for r in ws.iter_rows(values_only=True)]
+            yield ws.title, rows
+
+
+_LEVEL_ALIAS = {
+    "rail level": "rail_lvl", "rail lvl": "rail_lvl",
+    "formation level": "formation_lvl",
+    "hfl": "hfl", "highest flood level": "hfl",
+    "bed level": "bed_lvl", "bed lvl": "bed_lvl",
+    "cc top": "cc_top", "cc bottom": "cc_bottom",
+    "soffit level": "soffit_lvl", "soffit": "soffit_lvl",
+}
+
+_ELEV_ALIAS = {
+    "span clear": "span_clear",
+    "approach slab": "approach_slab",
+    "rcc slab thickness": "rcc_slab_thk",
+    "horizontal chain": "horizontal_chain",
+    "vertical dims": "vertical_dims",
+    "vertical dims chain": "vertical_dims",
+    "deck slope": "deck_slope",
+    "approach slope": "approach_slope",
+}
+
+_ELEV_ABUT_ALIAS = {
+    "abutment top width":  "top_width",
+    "abutment base width": "base_width",
+    "abutment height":     "height",
+    "footing width":       "footing_width",
+    "abutment footing width": "footing_width",
+    "cc width":            "cc_width",
+    "cc label":            "cc_label",
+    "abutment cc label":   "cc_label",
+}
+
+_PLAN_ALIAS = {
+    "transverse chain": "transverse_chain",
+    "longitudinal chain": "longitudinal_chain",
+    "offset from cl": "offset_from_cl",
+    "track cl offset": "track_cl_offset",
+    "stone flooring": "stone_flooring",
+    "flow direction": "flow_direction",
+    "left label": "left_label",
+    "right label": "right_label",
+    "section cut label": "section_cut_label",
+}
+
+_PLAN_WALL_ALIAS = {"curtain wall dim": "Curtain wall",
+                    "toe wall dim": "Toe wall",
+                    "drop wall dim": "Drop wall"}
+
+_SECT_ALIAS = {
+    "label": "label",
+    "transverse chain": "transverse_chain",
+    "vertical chain": "vertical_chain",
+    "rcc slab thickness": "rcc_slab_thk",
+    "slope left": "slope_left",
+    "slope right": "slope_right",
+    "abutment width": "abutment_width",
+    "drop wall dim": "drop_wall_dim",
+}
+
+_ARW_ALIAS = {   # Abutment & Return Wall sheet, after stripping the prefix
+    "top width": "top_width",
+    "base width": "base_width",
+    "height dims": "height_dims",
+    "height dims chain": "height_dims",
+    "footing": "footing",
+    "cc label": "cc_label",
+}
+
+_ZONE_WORDS = ("elevation", "plan", "section",
+               "abutment_section", "return_wall_section")
+
+
+def _parse_excel_gad(path: str):
+    """
+    Parse the standard BES GAD Excel workbook into the canonical dimension-table
+    dict (same schema as the AI-vision JSON). Returns (data, notes, warnings):
+      notes    — human-readable summary of what each sheet contributed
+      warnings — unrecognised parameters (typo / unknown row) that were skipped
+    Blank cells are skipped (never written as 0) so interpolate_missing()
+    can infer them later with a logged audit note.
+    """
+    data = {"zones": []}
+    notes, warnings = [], []
+    seen_zones = set()
+
+    for sheet_name, rows in _xl_read(path):
+        sk = _xl_norm(sheet_name)
+
+        if sk.startswith("general"):
+            kv = {_xl_norm(r[0]): r[1] for r in rows
+                  if r and r[0] not in (None, "") and len(r) > 1}
+            data["bridgeNo"]     = str(kv.get("bridge no", "") or "") or None
+            data["bridgeType"]   = str(kv.get("bridge type", "") or "") or None
+            data["drawingTitle"] = str(kv.get("drawing title", "") or "") or None
+            data["scale"]        = str(kv.get("scale", "") or "") or None
+            data["chainage"]     = str(kv.get("chainage", "") or "") or None
+            zl = [z.strip().lower() for z in str(kv.get("zones", "") or "").split(",")
+                  if z.strip().lower() in _ZONE_WORDS]
+            if zl:
+                seen_zones.update(zl)
+            notes.append("General: header info read")
+            continue
+
+        if sk.startswith("levels"):
+            rl, other = {}, []
+            for r in rows:
+                if not r or r[0] in (None, ""):
+                    continue
+                alias = _LEVEL_ALIAS.get(_xl_norm(r[0]))
+                v = _xl_num(r[1] if len(r) > 1 else None)
+                if alias is None:
+                    raw_lbl = str(r[0]).strip()
+                    if raw_lbl.lower() not in ("parameter",) and v is not None:
+                        other.append({"label": raw_lbl, "value": v})
+                    elif _xl_norm(r[0]) not in ("parameter",):
+                        warnings.append(f"Levels: unknown parameter '{r[0]}' — skipped")
+                    continue
+                if v is not None:
+                    rl[alias] = v
+            if rl or other:
+                rl["other"] = other
+                data.setdefault("elevation", {})["rl"] = rl
+                seen_zones.add("elevation")
+                notes.append(f"Levels: {len(rl)-1 + len(other)} RL values read")
+            continue
+
+        if sk.startswith("elevation"):
+            ev = data.setdefault("elevation", {})
+            for r in rows:
+                if not r or r[0] in (None, ""):
+                    continue
+                k = _xl_norm(r[0])
+                raw = r[1] if len(r) > 1 else None
+                if k in ("parameter", "notes"):
+                    if k == "notes" and raw not in (None, ""):
+                        ev["notes"] = [str(raw)]
+                    continue
+                alias = _ELEV_ALIAS.get(k) or _ELEV_ABUT_ALIAS.get(k)
+                if alias is None:
+                    warnings.append(f"Elevation: unknown parameter '{r[0]}' — skipped")
+                    continue
+                if k in _ELEV_ABUT_ALIAS:
+                    ab = ev.setdefault("abutment", {})
+                    v = _xl_num(raw)
+                    if v is not None:
+                        ab[alias] = v
+                elif alias in ("horizontal_chain", "vertical_dims"):
+                    ch = _xl_chain(raw)
+                    if ch:
+                        ev[alias] = ch
+                elif alias in ("deck_slope", "approach_slope"):
+                    if raw not in (None, ""):
+                        ev[alias] = str(raw)
+                else:
+                    v = _xl_num(raw)
+                    if v is not None:
+                        ev[alias] = v
+            if any(k in ev for k in ("span_clear", "horizontal_chain",
+                                     "rcc_slab_thk", "abutment")):
+                seen_zones.add("elevation")
+                notes.append("Elevation: dimensions read")
+            continue
+
+        if sk.startswith("plan"):
+            pv = data.setdefault("plan", {})
+            for r in rows:
+                if not r or r[0] in (None, ""):
+                    continue
+                k = _xl_norm(r[0])
+                raw = r[1] if len(r) > 1 else None
+                if k in ("parameter", "notes"):
+                    if k == "notes" and raw not in (None, ""):
+                        pv["notes"] = [str(raw)]
+                    continue
+                if k in _PLAN_WALL_ALIAS:
+                    v = _xl_num(raw)
+                    if v is not None:
+                        pv[k.replace(" dim", "")] = {
+                            "label": _PLAN_WALL_ALIAS[k], "dim": v}
+                    continue
+                alias = _PLAN_ALIAS.get(k)
+                if alias is None:
+                    warnings.append(f"Plan: unknown parameter '{r[0]}' — skipped")
+                    continue
+                if alias in ("transverse_chain", "longitudinal_chain",
+                             "offset_from_cl"):
+                    ch = _xl_chain(raw)
+                    if ch:
+                        pv[alias] = ch
+                elif alias == "stone_flooring":
+                    pv[alias] = _xl_bool(raw)
+                elif alias in ("left_label", "right_label",
+                               "section_cut_label", "flow_direction"):
+                    if raw not in (None, ""):
+                        pv[alias] = str(raw)
+                else:
+                    v = _xl_num(raw)
+                    if v is not None:
+                        pv[alias] = v
+            if pv:
+                seen_zones.add("plan")
+                notes.append("Plan: dimensions read")
+            continue
+
+        if sk.startswith("section"):
+            sv = data.setdefault("section", {})
+            for r in rows:
+                if not r or r[0] in (None, ""):
+                    continue
+                k = _xl_norm(r[0])
+                raw = r[1] if len(r) > 1 else None
+                if k in ("parameter", "notes"):
+                    if k == "notes" and raw not in (None, ""):
+                        sv["notes"] = [str(raw)]
+                    continue
+                alias = _SECT_ALIAS.get(k)
+                if alias is None:
+                    warnings.append(f"Section: unknown parameter '{r[0]}' — skipped")
+                    continue
+                if alias in ("transverse_chain", "vertical_chain"):
+                    ch = _xl_chain(raw)
+                    if ch:
+                        sv[alias] = ch
+                elif alias in ("label", "slope_left", "slope_right"):
+                    if raw not in (None, ""):
+                        sv[alias] = str(raw)
+                else:
+                    v = _xl_num(raw)
+                    if v is not None:
+                        sv[alias] = v
+            if sv:
+                seen_zones.add("section")
+                notes.append("Section: dimensions read")
+            continue
+
+        if "abutment" in sk or "return wall" in sk:
+            for r in rows:
+                if not r or r[0] in (None, ""):
+                    continue
+                k = _xl_norm(r[0])
+                raw = r[1] if len(r) > 1 else None
+                if k.startswith("abutment "):
+                    target, alias = "abutment_section", k[len("abutment "):]
+                elif k.startswith("return wall "):
+                    target, alias = "return_wall_section", k[len("return wall "):]
+                elif k.startswith("return-wall "):
+                    target, alias = "return_wall_section", k[len("return-wall "):]
+                else:
+                    if k not in ("parameter",):
+                        warnings.append(
+                            f"'{sheet_name}': parameter '{r[0]}' needs an "
+                            "'Abutment …' or 'Return Wall …' prefix — skipped")
+                    continue
+                alias = _ARW_ALIAS.get(alias)
+                if alias is None:
+                    warnings.append(f"'{sheet_name}': unknown '{r[0]}' — skipped")
+                    continue
+                sec = data.setdefault(target, {})
+                if alias == "height_dims":
+                    ch = _xl_chain(raw)
+                    if ch:
+                        sec[alias] = ch
+                elif alias == "cc_label":
+                    if raw not in (None, ""):
+                        sec[alias] = str(raw)
+                else:
+                    v = _xl_num(raw)
+                    if v is not None:
+                        sec[alias] = v
+            for z in ("abutment_section", "return_wall_section"):
+                if data.get(z):
+                    seen_zones.add(z)
+                    notes.append(f"{z.replace('_', ' ').title()}: dimensions read")
+            continue
+
+        if sk.startswith("verification"):
+            continue   # verifier-agent notes sheet — informational only
+        warnings.append(f"Unknown sheet '{sheet_name}' — skipped")
+
+    data["zones"] = [z for z in ("elevation", "plan", "section",
+                                 "abutment_section", "return_wall_section")
+                     if z in seen_zones]
+    if not data["zones"]:
+        raise ValueError(
+            "No usable data found in the workbook. Check that the sheets keep "
+            "their template names (General / Levels / Elevation / Plan / "
+            "Section / Abutment & Return Wall) and that at least one sheet "
+            "has values filled in.")
+    return data, notes, warnings
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# OBSERVATION EXCEL — AI-extracted values pre-filled into the standard template
+# ═══════════════════════════════════════════════════════════════════════════════
+# Flow: user uploads a PDF/image → AI records observations part-wise (4 parts)
+# → verifier agent re-checks → this writer produces the standard GAD workbook
+# with observed values filled in and blank cells marked "MISSING — fill by
+# hand". The user downloads it, completes the blanks, and re-uploads it; the
+# workbook is then parsed by _parse_excel_gad like any other Excel input.
+# Column C (source) is informational and ignored by the parser.
+
+
+def _fmt_chain(vals):
+    """Chain list → '4350, 4490' string for the Excel value column."""
+    out = []
+    for v in (vals or []):
+        if isinstance(v, (int, float)):
+            out.append(str(int(v)) if float(v).is_integer() else str(v))
+    return ", ".join(out) if out else None
+
+
+def _m(v):
+    """mm value formatting: 4490.0 → 4490."""
+    if isinstance(v, float) and v.is_integer():
+        return int(v)
+    return v
+
+
+def _data_to_template_values(data: dict) -> dict:
+    """Map the canonical dimension-table dict onto the EXCEL_TEMPLATE
+    parameter names. Returns {sheet: {param: (value, source_part)}}.
+    source_part: 1 elevation · 2 plan · 3 sectional view · 4 site plan/notes."""
+    ev   = data.get("elevation", {}) or {}
+    rl   = ev.get("rl", {}) if isinstance(ev.get("rl"), dict) else {}
+    ab   = ev.get("abutment", {}) or {}
+    pv   = data.get("plan", {}) or {}
+    sv   = data.get("section", {}) or {}
+    asec = data.get("abutment_section", {}) or {}
+    rsec = data.get("return_wall_section", {}) or {}
+    P1, P2, P3, P4 = 1, 2, 3, 4
+
+    def notes(lst):
+        return "; ".join(lst) if lst else None
+
+    return {
+        "General": {
+            "Bridge No":     (data.get("bridgeNo"), P4),
+            "Bridge Type":   (data.get("bridgeType"), P4),
+            "Drawing Title": (data.get("drawingTitle"), P4),
+            "Scale":         (data.get("scale"), P4),
+            "Chainage":      (data.get("chainage"), P4),
+            "Zones":         (", ".join(data.get("zones", [])) or None, P4),
+        },
+        "Levels (m)": {
+            "Rail Level":      (rl.get("rail_lvl"), P1),
+            "Formation Level": (rl.get("formation_lvl"), P1),
+            "HFL":             (rl.get("hfl"), P1),
+            "Bed Level":       (rl.get("bed_lvl"), P1),
+            "CC Top":          (rl.get("cc_top"), P1),
+            "CC Bottom":       (rl.get("cc_bottom"), P1),
+        },
+        "Elevation (mm)": {
+            "Span Clear":                         (_m(ev.get("span_clear")), P1),
+            "Approach Slab":                      (_m(ev.get("approach_slab")), P1),
+            "RCC Slab Thickness":                 (_m(ev.get("rcc_slab_thk")), P1),
+            "Horizontal Chain (comma separated)": (_fmt_chain(ev.get("horizontal_chain")), P1),
+            "Vertical Dims (comma separated)":    (_fmt_chain(ev.get("vertical_dims")), P1),
+            "Deck Slope":                         (ev.get("deck_slope"), P1),
+            "Approach Slope":                     (ev.get("approach_slope"), P1),
+            "Abutment Top Width":                 (_m(ab.get("top_width")), P1),
+            "Abutment Base Width":                (_m(ab.get("base_width")), P1),
+            "Abutment Height":                    (_m(ab.get("height")), P1),
+            "Footing Width":                      (_m(ab.get("footing_width")), P1),
+            "CC Width":                           (_m(ab.get("cc_width")), P1),
+            "CC Label":                           (ab.get("cc_label"), P1),
+            "Notes":                              (notes(ev.get("notes")), P1),
+        },
+        "Plan (mm)": {
+            "Transverse Chain (comma separated)":   (_fmt_chain(pv.get("transverse_chain")), P2),
+            "Longitudinal Chain (comma separated)": (_fmt_chain(pv.get("longitudinal_chain")), P2),
+            "Offset From CL (comma separated)":     (_fmt_chain(pv.get("offset_from_cl")), P2),
+            "Track CL Offset":                      (_m(pv.get("track_cl_offset")), P2),
+            "Stone Flooring (yes/no)":              ("yes" if pv.get("stone_flooring") else None, P2),
+            "Flow Direction":                       (pv.get("flow_direction"), P2),
+            "Left Label":                           (pv.get("left_label"), P2),
+            "Right Label":                          (pv.get("right_label"), P2),
+            "Section Cut Label":                    (pv.get("section_cut_label"), P2),
+            "Curtain Wall Dim":                     (_m((pv.get("curtain_wall") or {}).get("dim")), P2),
+            "Toe Wall Dim":                         (_m((pv.get("toe_wall") or {}).get("dim")), P2),
+            "Drop Wall Dim":                        (_m((pv.get("drop_wall") or {}).get("dim")), P2),
+            "Notes":                                (notes(pv.get("notes")), P2),
+        },
+        "Section (mm)": {
+            "Label":                              (sv.get("label"), P3),
+            "Transverse Chain (comma separated)": (_fmt_chain(sv.get("transverse_chain")), P3),
+            "Vertical Chain (comma separated)":   (_fmt_chain(sv.get("vertical_chain")), P3),
+            "RCC Slab Thickness":                 (_m(sv.get("rcc_slab_thk")), P3),
+            "Slope Left":                         (sv.get("slope_left"), P3),
+            "Slope Right":                        (sv.get("slope_right"), P3),
+            "Abutment Width":                     (_m(sv.get("abutment_width")), P3),
+            "Drop Wall Dim":                      (_m(sv.get("drop_wall_dim")), P3),
+            "Notes":                              (notes(sv.get("notes")), P3),
+        },
+        "Abutment & Return Wall (mm)": {
+            "Abutment Top Width":                     (_m(asec.get("top_width")), P3),
+            "Abutment Base Width":                    (_m(asec.get("base_width")), P3),
+            "Abutment Height Dims (comma separated)": (_fmt_chain(asec.get("height_dims")), P3),
+            "Abutment Footing":                       (_m(asec.get("footing")), P3),
+            "Abutment CC Label":                      (asec.get("cc_label"), P3),
+            "Return Wall Top Width":                  (_m(rsec.get("top_width")), P3),
+            "Return Wall Base Width":                 (_m(rsec.get("base_width")), P3),
+            "Return Wall Height Dims (comma separated)": (_fmt_chain(rsec.get("height_dims")), P3),
+            "Return Wall Footing":                    (_m(rsec.get("footing")), P3),
+            "Return Wall CC Label":                   (rsec.get("cc_label"), P3),
+        },
+    }
+
+
+def write_observed_excel(data: dict, path: str, verification: dict = None):
+    """Write the standard GAD workbook pre-filled with AI-observed values.
+    Observed cells are tinted and tagged 'AI observed · Part N'; blank cells
+    are tagged 'MISSING — fill by hand'. A trailing 'Verification Notes'
+    sheet records the verifier agent's corrections, additions, still-missing
+    fields and cross-check warnings (the parser skips this sheet)."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    values       = _data_to_template_values(data)
+    verification = verification or {}
+    wb = Workbook()
+    wb.remove(wb.active)
+    hdr_fill  = PatternFill("solid", fgColor="1F3A5F")
+    hdr_font  = Font(color="FFFFFF", bold=True, size=11)
+    obs_fill  = PatternFill("solid", fgColor="E7F0E3")   # light green
+    miss_font = Font(color="B3261E", bold=True, size=10)
+
+    for sheet, rows in EXCEL_TEMPLATE.items():
+        ws = wb.create_sheet(sheet[:31])
+        ws.column_dimensions["A"].width = 42
+        ws.column_dimensions["B"].width = 34
+        ws.column_dimensions["C"].width = 27
+        for col, h in enumerate(
+                ("Parameter", "Observed Value (mm / m)", "Source"), 1):
+            c = ws.cell(row=1, column=col, value=h)
+            c.font, c.fill = hdr_font, hdr_fill
+        for r, (param, _example) in enumerate(rows, start=2):
+            val, part = values.get(sheet, {}).get(param, (None, 0))
+            ws.cell(row=r, column=1, value=param)
+            ws.cell(row=r, column=2, value=val)
+            c3 = ws.cell(row=r, column=3)
+            if val not in (None, ""):
+                c3.value = f"AI observed · Part {part}"
+                c3.fill  = obs_fill
+            else:
+                c3.value = "MISSING — fill by hand"
+                c3.font  = miss_font
+            ws.cell(row=r, column=2).alignment = Alignment(wrap_text=True)
+        ws.freeze_panes = "A2"
+
+    # Verification Notes sheet (skipped by the parser on re-upload)
+    ws = wb.create_sheet("Verification Notes")
+    ws.column_dimensions["A"].width = 120
+    r = 1
+    def vrow(text, bold=False, color=None):
+        nonlocal r
+        c = ws.cell(row=r, column=1, value=text)
+        if bold:
+            c.font = Font(bold=True, size=11,
+                          color=color or "1F3A5F")
+        elif color:
+            c.font = Font(color=color, size=10)
+        r += 1
+    vrow("AI VERIFIER AGENT — CHECKS ON EXTRACTED OBSERVATIONS", bold=True)
+    for item in verification.get("corrected", []):
+        vrow(f"CORRECTED · {item.get('field')}: {item.get('from')} → "
+             f"{item.get('to')}  ({item.get('reason','')})", color="B3261E")
+    for item in verification.get("added", []):
+        vrow(f"ADDED (re-scan) · Part {item.get('part')}: "
+             f"{item.get('field')} = {item.get('value')}", color="1B6E3C")
+    for item in verification.get("still_missing", []):
+        vrow(f"STILL MISSING · {item} — measure/fill by hand", color="B3261E")
+    for item in verification.get("warnings", []):
+        vrow(f"CROSS-CHECK WARNING · {item}", color="B3261E")
+    if r == 1:
+        vrow("No issues reported by the verifier agent.")
+    wb.save(path)
+
+
+def _strip_code_fences(raw: str) -> str:
+    """Strip markdown code fences an AI may wrap its JSON in."""
+    cleaned = (raw or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("```")[1]
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:]
+    return cleaned.strip()
+
+
+def _parse_ai_json(raw: str):
+    """Tolerant JSON parse of an AI reply. Handles the common failure modes
+    seen in practice: code fences, // and /* */ comments, trailing commas,
+    python-style None/True/False, NaN/Infinity, smart quotes, single-quoted
+    strings, prose before/after the object, and truncated tails. Raises
+    json.JSONDecodeError when even repair can't recover the object."""
+    import re
+    cleaned = _strip_code_fences(raw)
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # Isolate the outermost {…} (drops prose around the object)
+    s, e = cleaned.find("{"), cleaned.rfind("}")
+    cand = cleaned[s:e + 1] if (s != -1 and e > s) else cleaned
+
+    attempts = []
+    t = re.sub(r"//[^\n\r]*", "", cand)                 # line comments
+    t = re.sub(r"/\*.*?\*/", "", t, flags=re.S)          # block comments
+    t = re.sub(r",\s*([}\]])", r"\1", t)                 # trailing commas
+    attempts.append(t)
+    t = re.sub(r"\b(NaN|-?Infinity)\b", "null", t)       # non-JSON literals
+    t = re.sub(r"\bNone\b", "null", t)
+    t = re.sub(r"\bTrue\b", "true", t)
+    t = re.sub(r"\bFalse\b", "false", t)
+    attempts.append(t)
+    t = (t.replace("\u201c", '"').replace("\u201d", '"')
+          .replace("\u2018", "'").replace("\u2019", "'"))  # smart quotes
+    attempts.append(t)
+    attempts.append(re.sub(r"'([^'\n]*)'", r'"\1"', t))  # single→double quotes
+
+    for a in attempts:
+        try:
+            return json.loads(a)
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+    # Last resort: salvage the object only if a parse consumes the candidate
+    # EXACTLY and the object looks like a dimension table (has a schema key).
+    # A nested sub-object ending mid-text means the reply was truncated and
+    # the caller should retry rather than use partial data.
+    dec = json.JSONDecoder()
+    for i, ch in enumerate(cand):
+        if ch == "{":
+            try:
+                obj, end = dec.raw_decode(cand[i:])
+            except ValueError:
+                continue
+            if (i + end == len(cand) and
+                    isinstance(obj, dict) and
+                    any(k in obj for k in ("zones", "elevation", "plan",
+                                           "section", "bridgeNo",
+                                           "drawingTitle"))):
+                return obj
+    raise json.JSONDecodeError(
+        "AI returned unparseable JSON even after repair", cand, 0)
+
+
+def _ocr_enhance(img):
+    """Upscale + autocontrast + unsharp-mask an image for OCR. Returns
+    (gray, enhanced) PIL images."""
+    from PIL import Image, ImageOps, ImageFilter, ImageEnhance
+    if max(img.size) < 2200:                     # small scans: upscale 2-3×
+        scale = max(2, 2200 // max(img.size))
+        img = img.resize((img.width * scale, img.height * scale),
+                         Image.Resampling.LANCZOS)
+    gray = ImageOps.autocontrast(img.convert("L"), cutoff=1)
+    enh = gray.filter(ImageFilter.UnsharpMask(radius=2, percent=160, threshold=2))
+    enh = ImageEnhance.Contrast(enh).enhance(1.35)
+    return gray, enh
+
+
+def _ocr_binarise(gray):
+    """Adaptive-threshold a grayscale image — survives uneven lighting,
+    faint pencil lines and coloured backgrounds. Falls back to a fixed
+    cutoff when OpenCV is unavailable."""
+    try:
+        import numpy as _np
+        import cv2
+        arr = _np.array(gray)
+        thr = cv2.adaptiveThreshold(arr, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                    cv2.THRESH_BINARY, 35, 12)
+        from PIL import Image as _Img
+        return _Img.fromarray(thr)
+    except Exception:
+        return gray.point(lambda p: 255 if p > 150 else 0)
+
+
+def _png_b64(img) -> str:
+    import io
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def _vision_variants(path: str):
+    """Build the OCR scan variants handed to the vision model:
+      image input → [contrast-enhanced, binarised]
+      PDF input   → [original PDF, 300-DPI enhanced render, binarised render]
+    Returns [(mime, b64, description)]."""
+    ext = os.path.splitext(path)[1].lower()
+    variants = []
+    if ext == ".pdf":
+        with open(path, "rb") as f:
+            variants.append(("application/pdf",
+                             base64.b64encode(f.read()).decode(),
+                             "original PDF"))
+        try:                                     # high-DPI render of page 1
+            import fitz
+            doc = fitz.open(path)
+            pix = doc[0].get_pixmap(matrix=fitz.Matrix(300 / 72, 300 / 72))
+            from PIL import Image as _Img
+            img = _Img.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            gray, enh = _ocr_enhance(img)
+            variants.append(("image/png", _png_b64(enh),
+                             f"300-DPI enhanced render "
+                             f"({pix.width}×{pix.height}px)"))
+            variants.append(("image/png", _png_b64(_ocr_binarise(gray)),
+                             "binarised render"))
+        except Exception:
+            pass
+    else:
+        from PIL import Image as _Img
+        img = _Img.open(path)
+        if img.mode not in ("RGB", "RGBA", "L"):
+            img = img.convert("RGBA" if "transparency" in img.info else "RGB")
+        gray, enh = _ocr_enhance(img)
+        variants.append(("image/png", _png_b64(enh),
+                         "contrast-enhanced scan"))
+        variants.append(("image/png", _png_b64(_ocr_binarise(gray)),
+                         "binarised scan"))
+    return variants
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1123,21 +2005,252 @@ class CAD2Worker(QThread):
     progress    = pyqtSignal(int)
     finished    = pyqtSignal(bool, str, object, object, str)
 
-    STEPS = [
+    STEPS_VISION = [
         "Load & encode file",
         "Claude Vision — extract dimension table",
         "Parse & validate dimensions",
         "Build scaled geometry (dimension-first)",
         "Write DXF — 1:1 model space (1 unit = 1 mm)",
     ]
+    STEPS_EXCEL = [
+        "Load workbook",
+        "Parse sheets → dimension table",
+        "Validate & interpolate dimensions",
+        "Build scaled geometry (dimension-first)",
+        "Write DXF — 1:1 model space (1 unit = 1 mm)",
+    ]
+    STEPS_PDF_EXCEL = [
+        "Load & encode drawing (PDF / image)",
+        "AI Vision — part-wise observation (4 parts)",
+        "Verifier agent — re-check & fill missing",
+        "Generate Excel — predefined format (observed values)",
+        "Ready — fill missing values & re-upload",
+    ]
+    STEPS = STEPS_VISION   # default shown by the panel before a worker exists
 
-    def __init__(self, file_path: str, api_key: str = "", gemini_key: str = ""):
+    def __init__(self, file_path: str, api_key: str = "", gemini_key: str = "",
+                 mode: str = "vision"):
         super().__init__()
         self.file_path  = file_path
         self.api_key    = api_key
         self.gemini_key = gemini_key
+        self.mode       = mode
 
     def run(self):
+        if self.mode == "excel":
+            self._run_excel()
+        elif self.mode == "pdf_to_excel":
+            self._run_pdf_to_excel()
+        else:
+            self._run_vision()
+
+    # ── PDF → EXCEL MODE — AI observes part-wise, verifier re-checks, the
+    #    user fills missing values and re-uploads the workbook ───────────
+    def _run_pdf_to_excel(self):
+        try:
+            # ── Step 0: Load & build enhanced OCR scan variants ───────
+            self.step_active.emit(0)
+            kb = os.path.getsize(self.file_path) // 1024
+            self.log_msg.emit(
+                f"Loaded: {os.path.basename(self.file_path)}  ({kb} KB)", "info")
+            variants = _vision_variants(self.file_path)
+            for _, _, desc in variants:
+                self.log_msg.emit(f"Prepared scan variant: {desc}", "info")
+            self.step_done.emit(0); self.progress.emit(10)
+
+            provider = AIProvider.dual(self.gemini_key, self.api_key)
+
+            def _vision_call(prompt, msg, v_idx):
+                mime, b64, _ = variants[v_idx]
+                if mime == "application/pdf":
+                    return provider.vision_pdf(
+                        prompt, b64, msg, max_tokens=8000)
+                return provider.vision(prompt, b64, mime, msg, max_tokens=8000)
+
+            def _parse_or_retry(prompt, msg, tag):
+                """Call the AI and parse its JSON. On invalid JSON, retry once
+                with the enhanced/binarised scan variant plus the parse error
+                as feedback — recovers both bad-JSON replies and misreads on
+                unclear/coloured drawings."""
+                try:
+                    return _parse_ai_json(_vision_call(prompt, msg, 0))
+                except json.JSONDecodeError as je:
+                    alt = 1 if len(variants) > 1 else 0
+                    self.log_msg.emit(
+                        f"⚠ {tag}: reply was not valid JSON ({je}) — "
+                        f"retrying with the enhanced OCR scan…", "warn")
+                    fix = (msg + f"\n\nYour previous reply was not valid "
+                           f"JSON ({je}). Return ONLY the corrected JSON "
+                           f"object — no prose, no comments.")
+                    return _parse_ai_json(_vision_call(prompt, fix, alt))
+
+            # ── Step 1: AI Vision — part-wise observation (4 parts) ───
+            self.step_active.emit(1)
+            self.log_msg.emit(
+                "AI Vision: scanning part-wise — "
+                "① Half Elevation & Half Section · ② Half Plan Top/Bottom · "
+                "③ Sectional View · ④ Site Plan & Notes…", "info")
+            user_msg = (
+                "Read this bridge GAD PART BY PART (PART 1 Half Elevation & "
+                "Half Section, PART 2 Half Plan Top & Bottom, PART 3 "
+                "Sectional View, PART 4 Site Plan and Notes). Record every "
+                "level, height, width and chain member you can read. "
+                "Read each number individually — never sum a chain. Use null "
+                "for anything not legible; do not guess.")
+            data = _parse_or_retry(
+                OBSERVE_SYSTEM_PROMPT, user_msg, "Observe pass")
+            zones = data.get("zones", [])
+            self.log_msg.emit(
+                f"Observations recorded  |  Zones: "
+                f"{', '.join(zones) if zones else 'auto-detect'}  |  "
+                f"Bridge: {data.get('bridgeNo','—')}", "ok")
+            self.step_done.emit(1); self.progress.emit(40)
+
+            # ── Step 2: Verifier agent — re-check & fill missing ──────
+            self.step_active.emit(2)
+            self.log_msg.emit(
+                "Verifier agent: re-checking every level/height/width and "
+                "re-scanning for missing entries…", "info")
+            v_msg = (
+                "Here is the extracted dimension table to verify:\n"
+                + json.dumps(data, ensure_ascii=False)
+                + "\n\nVerify every value against the drawing, correct any "
+                  "misread value, re-scan all 4 parts for missing/null "
+                  "entries, and run the cross-checks. Return the corrected "
+                  "JSON plus the verification block.")
+            data = _parse_or_retry(
+                VERIFY_SYSTEM_PROMPT, v_msg, "Verifier pass")
+            verify = data.pop("verification", {}) or {}
+
+            n_corr = len(verify.get("corrected", []))
+            n_add  = len(verify.get("added", []))
+            n_miss = len(verify.get("still_missing", []))
+            for c in verify.get("corrected", []):
+                self.log_msg.emit(
+                    f"↳ corrected: {c.get('field')}  {c.get('from')} → "
+                    f"{c.get('to')}", "warn")
+            for a in verify.get("added", []):
+                self.log_msg.emit(
+                    f"↳ added (Part {a.get('part')}): {a.get('field')} = "
+                    f"{a.get('value')}", "ok")
+            for w in verify.get("warnings", []):
+                self.log_msg.emit(f"⚠ Verifier: {w}", "warn")
+
+            # App-level cross-checks appended to the verifier's own
+            warnings = validate_extracted(data)
+            for w in warnings:
+                self.log_msg.emit(f"⚠ Validation: {w}", "warn")
+                verify.setdefault("warnings", []).append(w)
+            self.log_msg.emit(
+                f"Verifier done — {n_corr} corrected · {n_add} added · "
+                f"{n_miss} still missing (user fills these)", "ok")
+            self.step_done.emit(2); self.progress.emit(70)
+
+            # ── Step 3: Generate observation Excel (predefined format) ─
+            self.step_active.emit(3)
+            tmp_fd, tmp = tempfile.mkstemp(suffix=".xlsx")
+            os.close(tmp_fd)
+            write_observed_excel(data, tmp, verify)
+            kb = os.path.getsize(tmp) // 1024
+            self.log_msg.emit(
+                f"Excel generated: {kb} KB — observed values pre-filled, "
+                f"missing rows marked 'MISSING — fill by hand'.", "ok")
+            self.step_done.emit(3); self.progress.emit(95)
+
+            # ── Step 4: Hand over to the user ─────────────────────────
+            self.step_active.emit(4)
+            self.log_msg.emit(
+                "Next: Save the Excel → fill every MISSING row → drop the "
+                "workbook back here → 'Parse Excel & Generate DXF'.", "info")
+            self.step_done.emit(4); self.progress.emit(100)
+            self.finished.emit(True, "Excel observations ready", None, None, tmp)
+
+        except Exception as e:
+            import traceback
+            self.log_msg.emit(f"ERROR: {e}", "err")
+            self.log_msg.emit(traceback.format_exc()[:800], "err")
+            self.finished.emit(False, str(e), None, None, "")
+
+    # ── EXCEL MODE — deterministic parse, no AI call ─────────────────────
+    def _run_excel(self):
+        entities = bounds = meta = None
+        try:
+            # ── Step 0: Load workbook ─────────────────────────────────
+            self.step_active.emit(0)
+            ext = os.path.splitext(self.file_path)[1].lower()
+            if ext not in (".xlsx", ".xls"):
+                raise ValueError(
+                    f"Excel mode needs .xlsx or .xls — got '{ext}'. "
+                    "Images/PDFs use the Analyse (vision) route.")
+            kb = os.path.getsize(self.file_path) // 1024
+            self.log_msg.emit(
+                f"Loaded: {os.path.basename(self.file_path)}  ({kb} KB)", "info")
+            self.step_done.emit(0); self.progress.emit(10)
+
+            # ── Step 1: Parse sheets → canonical dimension table ──────
+            self.step_active.emit(1)
+            self.log_msg.emit("Parsing sheets → canonical dimension table…", "info")
+            data, parse_notes, parse_warns = _parse_excel_gad(self.file_path)
+            for n in parse_notes:
+                self.log_msg.emit(f"↳ {n}", "info")
+            for w in parse_warns:
+                self.log_msg.emit(f"⚠ {w}", "warn")
+            if not parse_warns:
+                self.log_msg.emit("All parameters recognised.", "ok")
+            self.step_done.emit(1); self.progress.emit(40)
+
+            # ── Step 2: Validate & interpolate ────────────────────────
+            self.step_active.emit(2)
+            interp_notes = interpolate_missing(data)
+            for n in interp_notes:
+                self.log_msg.emit(f"↳ interpolated: {n}", "warn")
+            if not interp_notes:
+                self.log_msg.emit("No missing dimensions — nothing to interpolate.", "ok")
+            warnings = validate_extracted(data)
+            for w in warnings:
+                self.log_msg.emit(f"⚠ Validation: {w}", "warn")
+            if not warnings:
+                self.log_msg.emit("✓ Dimension chains validated — no inconsistencies.", "ok")
+            zones = data.get("zones", [])
+            ev = data.get("elevation", {})
+            rl = ev.get("rl", {})
+            self.log_msg.emit(
+                f"Drawing: {data.get('drawingTitle','—')}  |  "
+                f"Zones: {', '.join(zones)}  |  "
+                f"Bridge: {data.get('bridgeNo','—')}", "ok")
+            self.step_done.emit(2); self.progress.emit(60)
+
+            # ── Step 3: Build geometry ────────────────────────────────
+            self.step_active.emit(3)
+            self.log_msg.emit("Building geometry from sheet dimensions…", "info")
+            entities, bounds, meta = build_bridge_geometry(data)
+            meta["data"] = data
+            self.log_msg.emit(
+                f"Geometry: {len(entities)} entities  |  "
+                f"Bounds: x={bounds['xMin']:.0f}..{bounds['xMax']:.0f}  "
+                f"y={bounds['yMin']:.0f}..{bounds['yMax']:.0f}", "ok")
+            self.step_done.emit(3); self.progress.emit(82)
+
+            # ── Step 4: Write DXF ─────────────────────────────────────
+            self.step_active.emit(4)
+            tmp_fd, tmp = tempfile.mkstemp(suffix=".dxf")
+            os.close(tmp_fd)
+            write_dxf(entities, tmp)
+            kb = os.path.getsize(tmp) // 1024
+            self.log_msg.emit(
+                f"DXF written: {kb} KB  |  1:1 model space  |  units: mm  |  "
+                f"10 named layers", "ok")
+            self.step_done.emit(4); self.progress.emit(100)
+            self.finished.emit(True, "Success", entities, (bounds, meta), tmp)
+
+        except Exception as e:
+            import traceback
+            self.log_msg.emit(f"ERROR: {e}", "err")
+            self.log_msg.emit(traceback.format_exc()[:800], "err")
+            self.finished.emit(False, str(e), None, None, "")
+
+    # ── VISION MODE — AI extraction from image/PDF (original pipeline) ───
+    def _run_vision(self):
         entities = bounds = meta = dxf_path = None
         try:
             # ── Step 0: Load ──────────────────────────────────────────
@@ -1198,12 +2311,7 @@ class CAD2Worker(QThread):
 
             # ── Step 2: Parse & validate ──────────────────────────────
             self.step_active.emit(2)
-            cleaned = raw_text.strip()
-            if cleaned.startswith("```"):
-                cleaned = cleaned.split("```")[1]
-                if cleaned.lower().startswith("json"):
-                    cleaned = cleaned[4:]
-            data = json.loads(cleaned.strip())
+            data = _parse_ai_json(raw_text)
 
             # Fill any missing dimensions from surrounding context (audited)
             interp_notes = interpolate_missing(data)
@@ -1398,7 +2506,9 @@ class DropZone2(QFrame):
     file_dropped = pyqtSignal(str)
     EXTS = {".jpg",".jpeg",".png",".gif",".webp",
             ".tiff",".tif",".bmp",".tga",".ppm",".pgm",
-            ".ico",".dib",".pcx",".pdf"}
+            ".ico",".dib",".pcx",".pdf",
+            ".xlsx",".xls"}
+    EXCEL_EXTS = {".xlsx", ".xls"}
 
     def __init__(self):
         super().__init__()
@@ -1417,7 +2527,8 @@ class DropZone2(QFrame):
         self.main_lbl.setStyleSheet(f"color:{COLORS['text_secondary']};border:none;")
         self.main_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(self.main_lbl)
-        self.fmt_lbl = QLabel("JPEG · PNG · WEBP · TIFF · BMP · PDF")
+        self.fmt_lbl = QLabel(
+            "JPEG · PNG · WEBP · TIFF · BMP · PDF · XLSX · XLS")
         self.fmt_lbl.setStyleSheet(f"color:{COLORS['text_muted']};font-size:11px;border:none;")
         self.fmt_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(self.fmt_lbl)
@@ -1433,16 +2544,16 @@ class DropZone2(QFrame):
     def reset(self):
         self.icon_lbl.setText("⬆")
         self.icon_lbl.setStyleSheet(f"color:{COLORS['text_muted']};border:none;font-size:22px;")
-        self.main_lbl.setText("Click or drag a bridge drawing here")
-        self.fmt_lbl.setText("JPEG · PNG · WEBP · TIFF · BMP · PDF")
+        self.main_lbl.setText("Click or drag a drawing or data sheet here")
+        self.fmt_lbl.setText("JPEG · PNG · WEBP · TIFF · BMP · PDF · XLSX · XLS")
         self.setObjectName("dropZone")
         self.style().unpolish(self); self.style().polish(self)
 
     def mousePressEvent(self, e):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select Bridge Drawing", "",
-            "Drawing Files (*.jpg *.jpeg *.png *.gif *.webp "
-            "*.tiff *.tif *.bmp *.tga *.ppm *.pdf)")
+            self, "Select Drawing or Data Sheet", "",
+            "Drawing / Data Files (*.jpg *.jpeg *.png *.gif *.webp "
+            "*.tiff *.tif *.bmp *.tga *.ppm *.pdf *.xlsx *.xls)")
         if path: self.file_dropped.emit(path)
 
     def dragEnterEvent(self, e: QDragEnterEvent):
@@ -1565,6 +2676,7 @@ class CAD2Panel(QWidget):
         super().__init__()
         self.current_file = None
         self.dxf_tmp      = None
+        self.obs_xlsx     = None
         self.worker       = None
         self.settings     = QSettings("BES", "BridgeEngineeringSuite")
         self._log_lines   = []
@@ -1594,9 +2706,12 @@ class CAD2Panel(QWidget):
         t = QLabel("CAD Process 2"); t.setObjectName("panelTitle")
         left_lay.addWidget(t)
         s = QLabel(
-            "Upload a bridge GAD drawing — Claude Vision extracts every dimension "
-            "and RL level as a structured table, then builds 1:1 DXF geometry "
-            "purely from those numbers. No pixel tracing.")
+            "Upload a bridge GAD drawing or an Excel data sheet. AI Vision "
+            "scans the drawing part-wise (① Half Elevation & Half Section · "
+            "② Half Plan Top & Bottom · ③ Sectional View · ④ Site Plan & "
+            "Notes), a verifier agent re-checks every level and dimension, "
+            "and geometry is built 1:1 purely from the numbers — "
+            "no pixel tracing.")
         s.setObjectName("panelSubtitle"); s.setWordWrap(True)
         left_lay.addWidget(s)
         left_lay.addSpacing(12)
@@ -1639,12 +2754,22 @@ class CAD2Panel(QWidget):
         self.clr_btn.setFixedHeight(42); self.clr_btn.setEnabled(False)
         self.clr_btn.clicked.connect(self._clear); ubr.addWidget(self.clr_btn)
         ubr.addStretch(); ul.addLayout(ubr)
+        tpl_btn = QPushButton("⬇   Excel Data Template  (levels & dimensions)")
+        tpl_btn.setObjectName("secondaryBtn"); tpl_btn.setFixedHeight(34)
+        tpl_btn.clicked.connect(self._save_template)
+        ul.addWidget(tpl_btn)
+        self.obs_btn = QPushButton("🔍   Extract Observations → Excel  (AI · 4 parts + verifier)")
+        self.obs_btn.setObjectName("secondaryBtn"); self.obs_btn.setFixedHeight(38)
+        self.obs_btn.setEnabled(False)
+        self.obs_btn.clicked.connect(self._start_extract)
+        ul.addWidget(self.obs_btn)
         left_lay.addWidget(uc); left_lay.addSpacing(12)
 
         # Progress card
         self.prog_card = QFrame(); self.prog_card.setObjectName("card")
         self.prog_card.setVisible(False)
-        pg = QVBoxLayout(self.prog_card)
+        self.prog_layout = QVBoxLayout(self.prog_card)
+        pg = self.prog_layout
         pg.setContentsMargins(18, 14, 18, 14); pg.setSpacing(8)
         ph = QHBoxLayout()
         ph.addWidget(self._bold("Processing pipeline"))
@@ -1716,18 +2841,23 @@ class CAD2Panel(QWidget):
             self.data_labels[key] = val
         rl2.addWidget(self.data_grid)
 
-        dxf_btn = QPushButton("⬇   Save DXF File")
-        dxf_btn.setObjectName("primaryBtn"); dxf_btn.setFixedHeight(40)
-        dxf_btn.clicked.connect(self._save_dxf)
-        rl2.addWidget(dxf_btn)
-        dwg_btn = QPushButton("⬇   Save DWG File  (needs ODA Converter)")
-        dwg_btn.setObjectName("secondaryBtn"); dwg_btn.setFixedHeight(40)
-        dwg_btn.clicked.connect(self._save_dwg)
-        rl2.addWidget(dwg_btn)
-        lsp_btn = QPushButton("⬇   Save AutoLISP  (.lsp → load → Save As DWG)")
-        lsp_btn.setObjectName("secondaryBtn"); lsp_btn.setFixedHeight(40)
-        lsp_btn.clicked.connect(self._save_lisp)
-        rl2.addWidget(lsp_btn)
+        self.xl_out_btn = QPushButton("⬇   Save Excel  (Observations)")
+        self.xl_out_btn.setObjectName("primaryBtn"); self.xl_out_btn.setFixedHeight(40)
+        self.xl_out_btn.setVisible(False)
+        self.xl_out_btn.clicked.connect(self._save_observed_excel)
+        rl2.addWidget(self.xl_out_btn)
+        self.dxf_btn = QPushButton("⬇   Save DXF File")
+        self.dxf_btn.setObjectName("primaryBtn"); self.dxf_btn.setFixedHeight(40)
+        self.dxf_btn.clicked.connect(self._save_dxf)
+        rl2.addWidget(self.dxf_btn)
+        self.dwg_btn = QPushButton("⬇   Save DWG File  (needs ODA Converter)")
+        self.dwg_btn.setObjectName("secondaryBtn"); self.dwg_btn.setFixedHeight(40)
+        self.dwg_btn.clicked.connect(self._save_dwg)
+        rl2.addWidget(self.dwg_btn)
+        self.lsp_btn = QPushButton("⬇   Save AutoLISP  (.lsp → load → Save As DWG)")
+        self.lsp_btn.setObjectName("secondaryBtn"); self.lsp_btn.setFixedHeight(40)
+        self.lsp_btn.clicked.connect(self._save_lisp)
+        rl2.addWidget(self.lsp_btn)
         new_btn = QPushButton("Process another file")
         new_btn.setObjectName("secondaryBtn"); new_btn.setFixedHeight(36)
         new_btn.clicked.connect(self._reset)
@@ -1823,14 +2953,56 @@ class CAD2Panel(QWidget):
     def _on_file(self, path):
         self.current_file = path
         self.drop_zone.set_file(path)
+        if os.path.splitext(path)[1].lower() in DropZone2.EXCEL_EXTS:
+            self.proc_btn.setText("▶   Parse Excel & Generate DXF")
+            self.obs_btn.setEnabled(False)
+        else:
+            self.proc_btn.setText("▶   Analyse & Generate DXF")
+            self.obs_btn.setEnabled(True)
         self.proc_btn.setEnabled(True)
         self.clr_btn.setEnabled(True)
+
+    def _is_excel(self):
+        return (self.current_file is not None and
+                os.path.splitext(self.current_file)[1].lower() in
+                DropZone2.EXCEL_EXTS)
+
+    def _rebuild_steps(self, descs):
+        """Swap the pipeline step pills when the mode changes
+        (vision vs excel routes have different step labels)."""
+        for st in self.steps:
+            self.prog_layout.removeWidget(st)
+            st.deleteLater()
+        self.steps = []
+        for i, desc in enumerate(descs, 1):
+            st = Step2(i, desc)
+            # keep pills above the "Live log" label: 0=header row, 1=bar
+            self.prog_layout.insertWidget(2 + i - 1, st)
+            self.steps.append(st)
 
     def _clear(self):
         self.current_file = None
         self.drop_zone.reset()
+        self.proc_btn.setText("▶   Analyse & Generate DXF")
         self.proc_btn.setEnabled(False)
         self.clr_btn.setEnabled(False)
+        self.obs_btn.setEnabled(False)
+
+    def _save_template(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Excel Data Template", "GAD_Data_Template.xlsx",
+            "Excel Workbook (*.xlsx)")
+        if not path:
+            return
+        try:
+            write_excel_template(path)
+        except Exception as e:
+            self._log(f"Template write failed: {e}", "err")
+            return
+        self._log(
+            f"Excel template saved: {path}\n"
+            f"Fill the sheets (blank = not shown), save, then drop the "
+            f"workbook here — no API key needed.", "ok")
 
     def _log(self, msg, level="info"):
         pfx = {"info": "  ", "ok": "✓ ", "warn": "⚠ ", "err": "✗ "}.get(level, "  ")
@@ -1841,18 +3013,36 @@ class CAD2Panel(QWidget):
 
     def _start(self):
         if not self.current_file: return
+        excel = self._is_excel()
+        mode  = "excel" if excel else "vision"
+        steps = CAD2Worker.STEPS_EXCEL if excel else CAD2Worker.STEPS_VISION
+        waiting = ("  ⏳ Parsing Excel dimension table…" if excel
+                   else "  ⏳ Extracting dimension table…")
+        self._launch(mode, steps, needs_key=not excel, status=waiting)
+
+    def _start_extract(self):
+        if not self.current_file: return
+        self._launch(
+            "pdf_to_excel", CAD2Worker.STEPS_PDF_EXCEL, needs_key=True,
+            status="  ⏳ AI observing drawing part-wise (4 parts)…")
+
+    def _launch(self, mode, steps, needs_key, status):
+        if not self.current_file: return
         key    = self._get_key()
         gemini = self._get_gemini_key()
-        if not key and not gemini:
-            self._log("No API key configured — go to ⚙ Settings → API Keys", "err")
+        if needs_key and not key and not gemini:
+            self._log("No API key configured — go to ⚙ Settings → API Keys "
+                      "(or use an Excel data sheet, which needs no key)", "err")
             return
         self.proc_btn.setEnabled(False); self.clr_btn.setEnabled(False)
+        self.obs_btn.setEnabled(False)
         self.res_card.setVisible(False); self.prog_card.setVisible(True)
         self.prog_bar.setValue(0); self.pct.setText("0%")
         self._log_lines = []; self.log_box.setText("")
+        self._rebuild_steps(steps)
         for st in self.steps: st.reset()
-        self.status_bar.setText("  ⏳ Extracting dimension table…")
-        self.worker = CAD2Worker(self.current_file, key, gemini)
+        self.status_bar.setText(status)
+        self.worker = CAD2Worker(self.current_file, key, gemini, mode)
         self.worker.log_msg.connect(self._log)
         self.worker.step_active.connect(
             lambda i: self.steps[i].set_active() if i < len(self.steps) else None)
@@ -1871,7 +3061,11 @@ class CAD2Panel(QWidget):
             self._bounds    = bounds
             self._extracted = meta.get("data", {})
             self.dxf_tmp    = dxf_tmp
+            self.obs_xlsx   = None
             self.gfx_view.load_entities(entities, bounds)
+            self.xl_out_btn.setVisible(False)
+            for b in (self.dxf_btn, self.dwg_btn, self.lsp_btn):
+                b.setVisible(True)
 
             # Populate data grid with extracted values
             d = self._extracted
@@ -1905,12 +3099,44 @@ class CAD2Panel(QWidget):
                 f"Bridge: {d.get('bridgeNo','—')}  |  "
                 f"Span: {ev.get('span_clear','—')}mm  |  "
                 f"RL Rail: {rl.get('rail_lvl','—')}m")
+        elif ok and dxf_tmp and dxf_tmp.lower().endswith(".xlsx"):
+            # Observation-extraction flow: hand the workbook to the user
+            self.dxf_tmp  = None
+            self.obs_xlsx = dxf_tmp
+            self._entities = []
+            self.res_title.setText("Excel Observations Ready — 4-Part Scan")
+            self.res_desc.setText(
+                "The AI recorded observed values part-wise and the verifier "
+                "agent re-checked them.\n"
+                "1) Save this Excel ·  2) fill every 'MISSING — fill by "
+                "hand' row (levels, heights, widths) ·  3) drop the "
+                "workbook back here → 'Parse Excel & Generate DXF'.")
+            self.xl_out_btn.setVisible(True)
+            for b in (self.dxf_btn, self.dwg_btn, self.lsp_btn):
+                b.setVisible(False)
+            self.status_bar.setText(
+                "  ✓ Observations exported — fill missing values, "
+                "re-upload the Excel to generate the drawing")
         else:
             self.res_title.setText("Processing Error")
             self.res_desc.setText(f"{msg}\n\nCheck your API key or try a cleaner image.")
             self.status_bar.setText("  ✗  Error — see log above")
             self.proc_btn.setEnabled(True); self.clr_btn.setEnabled(True)
+            if self.current_file and not self._is_excel():
+                self.obs_btn.setEnabled(True)
         self.res_card.setVisible(True)
+
+    def _save_observed_excel(self):
+        if not self.obs_xlsx or not os.path.exists(self.obs_xlsx):
+            return
+        base = os.path.splitext(os.path.basename(self.current_file or "bridge"))[0]
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Excel Observations", f"{base}_Observed.xlsx",
+            "Excel Workbook (*.xlsx)")
+        if path:
+            shutil.copy2(self.obs_xlsx, path)
+            self._log(f"Observation Excel saved: {path} — fill the MISSING "
+                      f"rows, then drop the file back here.", "ok")
 
     def _on_layer_toggle(self, layer, visible):
         self.gfx_view.set_layer_visible(layer, visible)
@@ -1958,6 +3184,9 @@ class CAD2Panel(QWidget):
 
     def _reset(self):
         self.res_card.setVisible(False); self.data_grid.setVisible(False)
-        self._clear(); self.dxf_tmp = None
+        self._clear(); self.dxf_tmp = None; self.obs_xlsx = None
+        self.xl_out_btn.setVisible(False)
+        for b in (self.dxf_btn, self.dwg_btn, self.lsp_btn):
+            b.setVisible(True)
         self.gfx_view.scene.clear()
         self.status_bar.setText("  No drawing loaded — upload a file and click Analyse")

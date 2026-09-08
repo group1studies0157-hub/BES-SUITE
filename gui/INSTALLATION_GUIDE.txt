@@ -1,0 +1,117 @@
+═══════════════════════════════════════════════════════════════════════════════
+                    BES — CLEAN INSTALLATION GUIDE
+═══════════════════════════════════════════════════════════════════════════════
+
+🚀 FILES TO REPLACE IN H:\BES FOLDER:
+
+1. DELETE ALL OLD VERSIONS FIRST:
+   - hydraulic_panel_enhanced.py ❌
+   - hydraulic_panel_final.py ❌
+   - hydraulic_panel_fixed.py ❌
+   - styles_premium.py ❌
+   - styles_premium_fixed.py ❌
+   - styles_macos.py ❌
+   - icons_trendy.py ❌
+
+2. COPY THESE FILES TO H:\BES (top level):
+   ✓ data_manager.py (NEW)
+   ✓ styles.py (REPLACE)
+   ✓ main_window.py (REPLACE)
+   ✓ smart_extract.py (REPLACE)
+   ✓ icons.py (NEW or REPLACE)
+
+3. COPY TO H:\BES\gui\ (subfolder):
+   ✓ hydraulic_panel.py (REPLACE)
+   ✓ icons_trendy.py (NEW - copy from gui/ folder in outputs)
+
+═══════════════════════════════════════════════════════════════════════════════
+FEATURES INCLUDED:
+═══════════════════════════════════════════════════════════════════════════════
+
+✅ Pro. Bridge BL Field
+   - Visible on Proposed Bridge data card
+   - Auto-fills from Existing BL
+   - User can override by editing
+
+✅ Dark Theme Text Visibility
+   - Graphite theme now readable (dark inputs with light text)
+   - All themes properly styled
+
+✅ Auto-fill Functionality
+   - Pro. BL auto-fills when you enter Exg. BL
+   - Pro. FL auto-calculates from RL (RL - 0.762)
+   - Visual indicators (accent borders) show auto-filled fields
+
+✅ Historical Data Persistence
+   - Saves Section names to ~/.bes/history.json
+   - Saves Between Stations values
+   - Auto-loads recent values on startup
+
+✅ Trendy Icons
+   - Modern emoji icons (🤖 🧮 ⬇️ 📎 👁️ etc.)
+   - Professional macOS-inspired design
+
+═══════════════════════════════════════════════════════════════════════════════
+INSTALLATION STEPS:
+═══════════════════════════════════════════════════════════════════════════════
+
+1. On your home machine (H: pendrive):
+   
+   cd /d H:\BES
+
+2. DELETE old duplicate files:
+   
+   del hydraulic_panel_enhanced.py
+   del hydraulic_panel_final.py
+   del hydraulic_panel_fixed.py
+   del styles_premium.py
+   del styles_premium_fixed.py
+   del styles_macos.py
+   del gui\icons_trendy.py (if exists)
+
+3. COPY NEW FILES (from downloaded outputs folder):
+   
+   Top level (H:\BES\):
+   - data_manager.py (NEW)
+   - styles.py (replace)
+   - main_window.py (replace)
+   - smart_extract.py (replace)
+   - icons.py (new/replace)
+   
+   Subfolder (H:\BES\gui\):
+   - hydraulic_panel.py (replace)
+   - icons_trendy.py (NEW - from gui/ subfolder in downloads)
+
+4. RESTART BES:
+   
+   C:\Users\Manoj\AppData\Local\BES\venv\Scripts\python.exe main.py
+
+═══════════════════════════════════════════════════════════════════════════════
+TROUBLESHOOTING:
+═══════════════════════════════════════════════════════════════════════════════
+
+If app still crashes:
+- Run from console to see actual error:
+  cd /d H:\BES
+  python.exe main.py
+  
+- Check H:\BES\ contains EXACTLY:
+  ✓ data_manager.py
+  ✓ styles.py
+  ✓ main_window.py
+  ✓ smart_extract.py
+  ✓ icons.py
+  
+- Check H:\BES\gui\ contains EXACTLY:
+  ✓ hydraulic_panel.py
+  ✓ icons_trendy.py
+
+DO NOT HAVE:
+✗ hydraulic_panel_final.py
+✗ hydraulic_panel_enhanced.py
+✗ styles_premium.py
+✗ Multiple copies of same file
+
+═══════════════════════════════════════════════════════════════════════════════
+END OF GUIDE
+═══════════════════════════════════════════════════════════════════════════════

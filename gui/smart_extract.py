@@ -280,27 +280,15 @@ def extract_fields_from_text(text: str, mode: str) -> dict:
     """
     Apply regex patterns to plain text and return extracted field dict.
     mode: "1" = NewLine, "2" = Doubling
+
+    The pattern maps above (_PATTERNS_NEWLINE / _PATTERNS_DOUBLING) stay
+    here — they're this panel's specific field schema. The actual matching
+    engine now lives once in core/smart_extractor.py, shared with every
+    other panel's Smart Extract button instead of being reimplemented here.
     """
+    from core.smart_extractor import extract_fields as _core_extract_fields
     patterns = _PATTERNS_NEWLINE if mode == "1" else _PATTERNS_DOUBLING
-    result = {}
-
-    for field, pats in patterns:
-        for pat in pats:
-            try:
-                m = re.search(pat, text, re.IGNORECASE | re.MULTILINE)
-                if m:
-                    val = m.group(1).strip() if m.lastindex and m.lastindex >= 1 else ""
-                    # Clean up trailing junk
-                    val = re.sub(r"\s+km2?$", "", val, flags=re.I).strip()
-                    val = re.sub(r"\s+m$", "", val, flags=re.I).strip()
-                    val = re.sub(r"\s+mm$", "", val, flags=re.I).strip()
-                    if val:
-                        result[field] = val
-                        break
-            except re.error:
-                continue
-
-    return result
+    return _core_extract_fields(text, patterns)
 
 
 # ── Excel-specific extractor ───────────────────────────────────────────────────
@@ -388,50 +376,27 @@ def extract_from_excel(path: str, mode: str) -> dict:
 # ── Text extraction from PDF ────────────────────────────────────────────────
 
 def extract_text_from_pdf(path: str) -> str:
-    """Extract text from PDF using pdfplumber (best) or pdftotext fallback."""
-    try:
-        import pdfplumber
-        with pdfplumber.open(path) as pdf:
-            pages = [p.extract_text() or "" for p in pdf.pages]
-        return "\n".join(pages)
-    except ImportError:
-        pass
-    try:
-        import subprocess
-        r = subprocess.run(
-            ["pdftotext", "-layout", path, "-"],
-            capture_output=True, text=True, timeout=30
-        )
-        if r.returncode == 0 and r.stdout.strip():
-            return r.stdout
-    except Exception:
-        pass
-    try:
-        import subprocess
-        r = subprocess.run(
-            ["python3", "-m", "pypdf2", path],
-            capture_output=True, text=True, timeout=30
-        )
-        if r.returncode == 0:
-            return r.stdout
-    except Exception:
-        pass
-    return ""
+    """
+    Extract text from PDF. Delegates to core/smart_extractor.py, which
+    tries PyMuPDF (fastest) -> pdfplumber -> OCR fallback for scanned PDFs —
+    the same engine used by every other panel, so a fix here (e.g. a new
+    fallback method) benefits all of them at once instead of only this file.
+    """
+    from core.smart_extractor import extract_text_from_pdf as _core_pdf
+    return _core_pdf(path)
 
 
 # ── Text extraction from image (OCR) ────────────────────────────────────────
 
 def extract_text_from_image(path: str) -> str:
-    """OCR using pytesseract. Returns empty string if not installed."""
-    try:
-        import pytesseract
-        from PIL import Image
-        img = Image.open(path)
-        return pytesseract.image_to_string(img, config="--psm 6")
-    except ImportError:
-        return ""
-    except Exception:
-        return ""
+    """
+    Extract text from a scanned image. Delegates to core/smart_extractor.py,
+    which runs the 3-strategy OCR pass (plain upscale, colored-annotation-safe
+    preprocessing, high-contrast grayscale) previously only available in
+    hydraulic_ocr.py, and returns whichever strategy read the most text.
+    """
+    from core.smart_extractor import extract_text_from_image as _core_img
+    return _core_img(path)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -442,7 +407,7 @@ def extract_text_from_image(path: str) -> str:
 class ExtractWorker(QThread):
     finished = pyqtSignal(dict, str)   # fields, source_text_preview
     error    = pyqtSignal(str)
-    progress = pyqtSignal(str)
+    progress = pyqtSignal(int, str)    # percent, message -- same convention as CDWorker
 
     def __init__(self, file_path: str, mode: str):
         super().__init__()
@@ -454,12 +419,12 @@ class ExtractWorker(QThread):
         ext  = os.path.splitext(path)[1].lower()
         try:
             if ext in ('.xlsx', '.xls'):
-                self.progress.emit("Reading Excel file...")
+                self.progress.emit(15, "Reading Excel file...")
                 fields = extract_from_excel(path, self.mode)
                 preview = f"Excel: {os.path.basename(path)}"
 
             elif ext == '.pdf':
-                self.progress.emit("Extracting text from PDF...")
+                self.progress.emit(15, "Extracting text from PDF...")
                 text = extract_text_from_pdf(path)
                 if not text.strip():
                     self.error.emit(
@@ -467,12 +432,12 @@ class ExtractWorker(QThread):
                         "If it is a scanned image PDF, install pytesseract for OCR support."
                     )
                     return
-                self.progress.emit("Matching fields...")
+                self.progress.emit(55, "Matching fields...")
                 fields = extract_fields_from_text(text, self.mode)
                 preview = text[:200].replace("\n", " ")
 
             elif ext in ('.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'):
-                self.progress.emit("Running OCR on image...")
+                self.progress.emit(15, "Running OCR on image...")
                 text = extract_text_from_image(path)
                 if not text.strip():
                     self.error.emit(
@@ -482,7 +447,7 @@ class ExtractWorker(QThread):
                         "  https://github.com/tesseract-ocr/tesseract"
                     )
                     return
-                self.progress.emit("Matching fields...")
+                self.progress.emit(55, "Matching fields...")
                 fields = extract_fields_from_text(text, self.mode)
                 preview = text[:200].replace("\n", " ")
 
@@ -493,6 +458,42 @@ class ExtractWorker(QThread):
             if "_error" in fields:
                 self.error.emit(fields["_error"])
                 return
+
+            # ── AI fallback for low regex yield ──────────────────────────
+            # Regex works well on clean, consistently-phrased exports (e.g.
+            # Waterway Calculation reports, where "LABEL : VALUE" pairs sit
+            # adjacent in reading order). GAD/drawing PDFs are different:
+            # CAD tools export text objects in drawing order, not reading
+            # order, and phrasing varies drawing to drawing — so the same
+            # regex library that scores well on a calc report can miss most
+            # fields on a GAD. When that happens, ask the AI to read the
+            # same noisy text and fill in what regex missed, using whichever
+            # key (Gemini free tier first, then Claude) is set in Settings.
+            # This is best-effort: if no key is configured, or the AI call
+            # fails, the regex results still stand unchanged.
+            if ext in ('.pdf', '.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'):
+                field_map = DOUBLING_FIELD_MAP if self.mode == "2" else NEWLINE_FIELD_MAP
+                fill_ratio = len(fields) / max(len(field_map), 1)
+                if fill_ratio < 0.5:
+                    self.progress.emit(75, "Low match rate — asking AI to fill remaining fields...")
+                    try:
+                        from core.smart_extractor import load_api_keys, extract_ai_fields
+                        claude_key, gemini_key = load_api_keys()
+                        if claude_key or gemini_key:
+                            labels = {k: v[1] for k, v in field_map.items()}
+                            ai_fields = extract_ai_fields(
+                                text, labels,
+                                claude_key=claude_key, gemini_key=gemini_key,
+                                extra_context=(
+                                    "This text was extracted from a scanned/CAD-exported "
+                                    "railway bridge GAD drawing and may be out of reading "
+                                    "order, with labels and values not always adjacent."
+                                ),
+                            )
+                            for k, v in ai_fields.items():
+                                fields.setdefault(k, v)   # a regex match always wins if present
+                    except Exception:
+                        pass  # best-effort only — never blocks the regex result
 
             self.finished.emit(fields, preview)
 
@@ -615,9 +616,19 @@ class ReviewDialog(QDialog):
 
 class SmartExtractWidget(QWidget):
     """
-    Drag-drop zone for rule-based field extraction.
-    No AI — uses regex + Excel cell mapping.
+    Drag-drop zone for rule-based field extraction (with AI fallback for
+    low-match documents — see ExtractWorker).
+
+    Exposes progressChanged / extractionFinished / extractionFailed so an
+    external control (e.g. the top-bar "Smart Extract" button, which
+    replaced this widget's own visible progress bar/status label) can
+    animate itself off the real worker state instead of showing nothing.
     """
+
+    progressChanged     = pyqtSignal(int, str)   # percent, message
+    extractionFinished  = pyqtSignal(dict)       # extracted fields
+    extractionFailed    = pyqtSignal(str)        # error message
+    extractionCancelled = pyqtSignal()           # user closed the file dialog with no selection
 
     SUPPORTED = {'.png','.jpg','.jpeg','.bmp','.tiff','.tif','.webp',
                  '.pdf','.xlsx','.xls'}
@@ -627,6 +638,7 @@ class SmartExtractWidget(QWidget):
         self._mode   = mode
         self._form   = parent_form
         self._worker = None
+        self._orphaned = []   # cancelled-but-still-running workers, kept alive until they finish
         self._field_map = DOUBLING_FIELD_MAP if mode == "2" else NEWLINE_FIELD_MAP
         self.setAcceptDrops(True)
         self._build()
@@ -750,8 +762,47 @@ class SmartExtractWidget(QWidget):
         button living outside this widget, such as in the top bar) to open
         the same file picker as the in-widget Browse button. Drag-and-drop
         and Browse both ultimately call _start(path) below — this is just
-        a third door into that same flow, not a separate code path."""
+        a third door into that same flow, not a separate code path.
+
+        Cancels any in-flight extraction first, so clicking Smart Extract
+        again while a previous file (e.g. a slow AI fallback call) is still
+        being processed always lets the user pick a new file immediately,
+        instead of the button/widget staying stuck on the old one."""
+        self.cancel_current()
         self._browse()
+
+    def cancel_current(self):
+        """Abort tracking of any in-flight worker. The underlying QThread
+        (which may be blocked on a slow network call) is not force-killed —
+        Qt doesn't support that safely — but its signals are disconnected
+        so its eventual result is simply ignored, and this widget/button
+        are freed to start a brand new extraction right away.
+
+        The old worker is kept in self._orphaned (not just dropped) until
+        it actually finishes running — releasing the only Python reference
+        to a QThread that's still executing can crash PyQt outright."""
+        if self._worker is None:
+            return
+        old = self._worker
+        for sig, slot in (
+            (old.progress, self._on_worker_progress),
+            (old.finished, self._on_done),
+            (old.error, self._on_error),
+        ):
+            try:
+                sig.disconnect(slot)
+            except TypeError:
+                pass   # already disconnected
+        self._orphaned.append(old)
+        old.finished.connect(lambda *_: self._prune_orphaned())
+        old.error.connect(lambda *_: self._prune_orphaned())
+        self._worker = None
+        self._prog.setVisible(False)
+        self._browse_btn.setEnabled(True)
+        self.extractionCancelled.emit()
+
+    def _prune_orphaned(self):
+        self._orphaned = [w for w in self._orphaned if w.isRunning()]
 
     def _browse(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -764,6 +815,8 @@ class SmartExtractWidget(QWidget):
         )
         if path:
             self._start(path)
+        else:
+            self.extractionCancelled.emit()
 
     # ── Extraction flow ────────────────────────────────────────────────────
 
@@ -771,12 +824,17 @@ class SmartExtractWidget(QWidget):
         self._set_status(f"Reading {os.path.basename(path)}...")
         self._prog.setVisible(True)
         self._browse_btn.setEnabled(False)
+        self.progressChanged.emit(5, f"Reading {os.path.basename(path)}...")
 
         self._worker = ExtractWorker(path, self._mode)
-        self._worker.progress.connect(self._set_status)
+        self._worker.progress.connect(self._on_worker_progress)
         self._worker.finished.connect(self._on_done)
         self._worker.error.connect(self._on_error)
         self._worker.start()
+
+    def _on_worker_progress(self, pct: int, msg: str):
+        self._set_status(msg)
+        self.progressChanged.emit(pct, msg)
 
     def _on_done(self, fields: dict, preview: str):
         self._prog.setVisible(False)

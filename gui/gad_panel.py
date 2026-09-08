@@ -51,7 +51,7 @@ ZONE DETECTION
 
 from __future__ import annotations
 
-import json, os, re
+import json, os, re, time, base64, threading, html
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -62,7 +62,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
 from PyQt6.QtGui  import QFont, QDragEnterEvent, QDropEvent
 
-from gui.styles import COLORS
+from gui.styles import COLORS, THEME_SWATCHES, current_theme
 
 ACCENT = COLORS["accent"]
 
@@ -870,11 +870,12 @@ class VerificationWorker(QThread):
 # ─────────────────────────────────────────────────────────────────────────────
 
 _ZONE_ICONS = {
-    "ELEVATION": "📐",
-    "PLAN":      "🗺",
-    "SECTION":   "✂",
-    "NOTES":     "📝",
-    "UNKNOWN":   "❓",
+    "ELEVATION":  "📐",
+    "PLAN":       "🗺",
+    "SECTION":    "✂",
+    "NOTES":      "📝",
+    "BORE LOG":   "🔶",
+    "UNKNOWN":    "❓",
 }
 
 _METHOD_LABELS = {
@@ -1125,13 +1126,38 @@ def _build_html(report: dict) -> str:
 class DropZone(QFrame):
     file_dropped = pyqtSignal(str)
 
-    def __init__(self, label: str, parent=None):
+    def __init__(self, label: str, parent=None, compact: bool = False,
+                 accept_exts: list[str] | None = None):
         super().__init__(parent)
         self._filepath = ""
+        self._compact = compact
+        # File types this drop zone accepts, e.g. [".pdf", ".png", ".jpg"].
+        # Defaults to PDF-only to preserve existing behaviour.
+        self._accept_exts = [e.lower() for e in (accept_exts or [".pdf"])]
         self.setObjectName("dropZone")
         self.setAcceptDrops(True)
-        self.setMinimumHeight(95)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        if compact:
+            self.setFixedHeight(38)
+            lay = QHBoxLayout(self)
+            lay.setContentsMargins(12, 0, 12, 0)
+            lay.setSpacing(8)
+            self._icon = QLabel("📄"); self._icon.setFont(QFont("Segoe UI", 12))
+            lay.addWidget(self._icon)
+            self._lbl = QLabel(label)
+            self._lbl.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+            lay.addWidget(self._lbl)
+            self._hint = QLabel("— click to browse")
+            self._hint.setStyleSheet(f"color:{COLORS['text_muted']};font-size:9px;")
+            lay.addWidget(self._hint)
+            lay.addStretch()
+            self._fname = QLabel("")
+            self._fname.setStyleSheet(f"color:{ACCENT};font-size:9px;font-weight:600;")
+            lay.addWidget(self._fname)
+            return
+
+        self.setMinimumHeight(95)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 10, 12, 10)
         lay.setSpacing(3)
@@ -1169,16 +1195,19 @@ class DropZone(QFrame):
         urls = e.mimeData().urls()
         if urls:
             p = urls[0].toLocalFile()
-            if p.lower().endswith(".pdf"): self._set(p)
+            if Path(p).suffix.lower() in self._accept_exts:
+                self._set(p)
 
     def _browse(self):
-        p, _ = QFileDialog.getOpenFileName(self, "Select PDF", "", "PDF (*.pdf)")
+        patterns = " ".join(f"*{e}" for e in self._accept_exts)
+        p, _ = QFileDialog.getOpenFileName(
+            self, "Select file", "", f"Supported files ({patterns})")
         if p: self._set(p)
 
     def _set(self, path):
         self._filepath = path
         self._fname.setText(f"✓  {Path(path).name}")
-        self._hint.setText("Click to change")
+        self._hint.setText("click to change" if self._compact else "Click to change")
         self.file_dropped.emit(path)
 
     @property
@@ -1187,7 +1216,7 @@ class DropZone(QFrame):
     def clear(self):
         self._filepath = ""
         self._fname.setText("")
-        self._hint.setText("Drop PDF  or  click to browse")
+        self._hint.setText("— click to browse" if self._compact else "Drop PDF  or  click to browse")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1567,15 +1596,1860 @@ def compute_vc_mm(discharge_cumecs: float) -> tuple[int, str]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Gradient Checker — auto CH/RL/gradient extraction & verification
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# On a GAD "SITE PLAN" sheet, gradient data is drawn as small stacked/rotated
+# text groups along the railway boundary lines, e.g.:
+#
+#     F1 IN 290   R1 IN 120
+#     CH : 45420
+#     RL:130.257
+#
+# EXG. (existing) work is drawn in BLACK, PRO. (proposed) work is drawn in RED
+# — this is the standing layer convention used across all GAD sheets
+# (see EXG WORK / PROP. DRAW colour 1 in the layer standard). The same
+# convention is reused here: black chainage/RL/gradient text → EXG,
+# red chainage/RL/gradient text → PRO.
+#
+# The bridge's own location is picked from the centre description line,
+# e.g. "C/L OF BRIDGE NO. 47KK @ CH: 45462.393 m".
+
+_CH_RE = re.compile(r'CH\s*[:\.]?\s*([\d][\d,]*\.?\d*)', re.IGNORECASE)
+_RL_RE = re.compile(r'RL\s*[:\.]?\s*([\d][\d,]*\.?\d*)', re.IGNORECASE)
+# Matches "R1 IN 120", "F1 IN 290", "R 1 IN 100" etc.
+_GRAD_RE = re.compile(r'\b([RF])\s*[\d.]*\s*IN\s*([\d,]+\.?\d*)', re.IGNORECASE)
+# Matches "C/L OF BRIDGE NO. 47KK @ CH: 45462.393" / "BRIDGE No. 505 AT CH. 284200.00m"
+# (also "BR NO", "BRIDGE NO:") — NO./No./no, AT/@, CH:/CH. all tolerated, OCR-friendly.
+_BRIDGE_CH_RE = re.compile(
+    r'BRIDGE\s+NO\.?\s*([A-Z0-9/\-]+)[^C]{0,60}?CH\s*[:\.]?\s*([\d][\d,]*\.?\d*)',
+    re.IGNORECASE | re.DOTALL)
+
+
+def _classify_gradient_color(rgb) -> str:
+    """EXG data is drawn black, PRO data is drawn red — the fixed GAD convention."""
+    name = _rgb_name(rgb)
+    if name == "red":
+        return "PRO"
+    if name in ("black", "unknown"):
+        return "EXG"
+    return "OTHER"
+
+
+def _span_center(bbox):
+    x0, y0, x1, y1 = bbox
+    return ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+
+
+def _dist(p1, p2):
+    return ((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2) ** 0.5
+
+
+def extract_gradient_data(pdf_path: str) -> dict:
+    """
+    Smart-recognises chainage (CH), reduced level (RL) and gradient labels
+    ("R1 IN 120", "F1 IN 290" …) anywhere on the sheet, classifying each by
+    ink colour into EXG (black) / PRO (red). Also locates every bridge's
+    own chainage from its centre-line description text.
+
+    Returns:
+      {
+        "bridges": [{"no": "47KK", "ch": 45462.393, "page": 1}, ...],
+        "points":  {"EXG": [{"ch","rl","pos","page"}, ...], "PRO": [...]},
+        "labels":  {"EXG": [{"dir","ratio","pos","page","raw"}, ...], "PRO": [...]},
+      }
+    """
+    import fitz
+    doc = fitz.open(pdf_path)
+
+    points, labels, bridges = {"EXG": [], "PRO": []}, {"EXG": [], "PRO": []}, []
+
+    for pg_no, page in enumerate(doc, start=1):
+        raw = page.get_text("dict")
+        spans = []
+        for block in raw.get("blocks", []):
+            for line in block.get("lines", []):
+                for sp in line.get("spans", []):
+                    txt = sp.get("text", "").strip()
+                    if not txt:
+                        continue
+                    ci = sp.get("color", 0)
+                    rgb = (((ci >> 16) & 255) / 255.0,
+                           ((ci >> 8) & 255) / 255.0,
+                           (ci & 255) / 255.0)
+                    spans.append({"text": txt, "bbox": sp["bbox"], "rgb": rgb})
+
+        # Bridge centre-line chainage (from full page text, colour-agnostic)
+        full_text = page.get_text()
+        for m in _BRIDGE_CH_RE.finditer(full_text):
+            try:
+                ch_val = float(m.group(2).replace(",", ""))
+            except ValueError:
+                continue
+            bridges.append({"no": m.group(1).strip().rstrip(".:,"),
+                             "ch": ch_val, "page": pg_no})
+
+        ch_spans, rl_spans, grad_spans = [], [], []
+        for sp in spans:
+            txt, cat = sp["text"], _classify_gradient_color(sp["rgb"])
+            if cat == "OTHER":
+                continue
+            if "BRIDGE" in txt.upper():
+                continue  # avoid re-capturing the bridge description as a CH point
+            m_ch, m_rl, m_gr = _CH_RE.search(txt), _RL_RE.search(txt), _GRAD_RE.search(txt)
+            if m_ch:
+                try:
+                    ch_spans.append({"val": float(m_ch.group(1).replace(",", "")),
+                                      "pos": _span_center(sp["bbox"]), "cat": cat})
+                except ValueError:
+                    pass
+            if m_rl:
+                try:
+                    rl_spans.append({"val": float(m_rl.group(1).replace(",", "")),
+                                      "pos": _span_center(sp["bbox"]), "cat": cat})
+                except ValueError:
+                    pass
+            if m_gr:
+                try:
+                    grad_spans.append({"dir": m_gr.group(1).upper(),
+                                        "ratio": float(m_gr.group(2).replace(",", "")),
+                                        "pos": _span_center(sp["bbox"]),
+                                        "cat": cat, "raw": txt, "page": pg_no})
+                except ValueError:
+                    pass
+
+        # Pair each CH with the nearest same-colour RL (they sit stacked together)
+        used_rl = set()
+        for chs in ch_spans:
+            best_i, best_d = None, 1e9
+            for i, rls in enumerate(rl_spans):
+                if i in used_rl or rls["cat"] != chs["cat"]:
+                    continue
+                d = _dist(chs["pos"], rls["pos"])
+                if d < best_d:
+                    best_d, best_i = d, i
+            if best_i is not None and best_d <= 120:
+                used_rl.add(best_i)
+                points[chs["cat"]].append({"ch": chs["val"], "rl": rl_spans[best_i]["val"],
+                                            "pos": chs["pos"], "page": pg_no})
+
+        for gr in grad_spans:
+            labels[gr["cat"]].append(gr)
+
+    doc.close()
+
+    for cat in points:
+        seen, uniq = set(), []
+        for p in points[cat]:
+            key = (round(p["ch"], 3), round(p["rl"], 3), p["page"])
+            if key in seen:
+                continue
+            seen.add(key)
+            uniq.append(p)
+        points[cat] = sorted(uniq, key=lambda p: p["ch"])
+
+    return {"bridges": bridges, "points": points, "labels": labels}
+
+
+def compute_gradients(points: list[dict]) -> list[dict]:
+    """
+    Auto-calculates the gradient of every consecutive CH/RL pair (ascending
+    chainage order): direction R (rising) / F (falling) / LEVEL, and the
+    "1 in X" ratio, purely from the surveyed CH & RL values.
+    """
+    segs = []
+    for p1, p2 in zip(points, points[1:]):
+        d_ch = p2["ch"] - p1["ch"]
+        d_rl = p2["rl"] - p1["rl"]
+        if d_ch <= 0:
+            continue
+        if abs(d_rl) < 1e-6:
+            direction, ratio = "LEVEL", None
+        else:
+            direction, ratio = ("R" if d_rl > 0 else "F"), abs(d_ch / d_rl)
+        ch_mid = (p1["ch"] + p2["ch"]) / 2.0
+        rl_mid = p1["rl"] + (ch_mid - p1["ch"]) * (d_rl / d_ch)
+        segs.append({
+            "ch1": p1["ch"], "rl1": p1["rl"], "pos1": p1["pos"],
+            "ch2": p2["ch"], "rl2": p2["rl"], "pos2": p2["pos"], "page": p1["page"],
+            "delta_ch": d_ch, "delta_rl": d_rl,
+            "ch_mid": ch_mid, "rl_mid": rl_mid,
+            "direction": direction, "ratio": ratio,
+            "slope_pct": (d_rl / d_ch * 100) if d_ch else 0.0,
+        })
+    return segs
+
+
+def match_labels_to_segments(segments: list[dict], labels: list[dict],
+                              max_dist: float = 260.0) -> list[dict]:
+    """
+    Cross-checks each computed segment against the nearest drawn gradient
+    label (by page position, using whichever segment endpoint is closer),
+    flagging MATCH / MISMATCH / UNLABELLED for each segment.
+    """
+    out = []
+    for seg in segments:
+        best, best_d = None, 1e9
+        for lb in labels:
+            if lb.get("page") != seg["page"]:
+                continue
+            d = min(_dist(lb["pos"], seg["pos1"]), _dist(lb["pos"], seg["pos2"]))
+            if d < best_d:
+                best_d, best = d, lb
+        status, remark, matched = "UNLABELLED", \
+            "No gradient label found on the drawing near this segment.", None
+        if best is not None and best_d <= max_dist:
+            matched = best["raw"]
+            if seg["direction"] == "LEVEL" or seg["ratio"] is None:
+                status  = "INFO"
+                remark  = f'Nearest drawn label is "{best["raw"]}" — segment computes as level.'
+            else:
+                dir_ok   = best["dir"] == seg["direction"]
+                ratio_ok = best["ratio"] and abs(best["ratio"] - seg["ratio"]) / best["ratio"] <= 0.05
+                if dir_ok and ratio_ok:
+                    status = "MATCH"
+                    remark = f'Drawn label "{best["raw"]}" agrees with the computed gradient.'
+                else:
+                    status = "MISMATCH"
+                    remark = (f'Drawn label "{best["raw"]}" does not match the value computed '
+                              f'from CH/RL ({seg["direction"]}1 in {seg["ratio"]:.1f}).')
+        out.append({**seg, "label_status": status, "label_remark": remark,
+                    "matched_label": matched})
+    return out
+
+
+def bridges_in_segments(bridges: list[dict], segments: list[dict]) -> dict:
+    """Maps each bridge chainage to the segment (of the given colour group) it falls within."""
+    out = {}
+    for br in bridges:
+        for seg in segments:
+            if seg["ch1"] <= br["ch"] <= seg["ch2"]:
+                out[br["no"]] = seg
+                break
+    return out
+
+
+def run_gradient_check(pdf_path: str) -> dict:
+    """Top-level entry point: extract → compute → cross-check for EXG and PRO."""
+    data = extract_gradient_data(pdf_path)
+    result = {"bridges": data["bridges"], "colors": {}}
+    for cat in ("EXG", "PRO"):
+        pts  = data["points"][cat]
+        segs = compute_gradients(pts)
+        segs = match_labels_to_segments(segs, data["labels"][cat])
+        at_bridge = bridges_in_segments(data["bridges"], segs)
+        result["colors"][cat] = {
+            "points": pts, "segments": segs,
+            "labels_found": len(data["labels"][cat]),
+            "bridge_segments": at_bridge,
+        }
+    return result
+
+
+def _build_gradient_html(result: dict) -> str:
+    bridges = result.get("bridges", [])
+    colors  = result.get("colors", {})
+
+    if not any(colors.get(c, {}).get("segments") for c in ("EXG", "PRO")):
+        return (
+            "<div style='background:#271D07;border:1px solid #D29922;"
+            "border-radius:10px;padding:20px;font-family:Segoe UI,sans-serif;'>"
+            "<b style='color:#D29922;font-size:14px;'>⚠ No chainage/RL pairs recognised</b><br>"
+            "<span style='color:#8B949E;font-size:12px;'>Could not find CH:/RL: text pairs "
+            "on this sheet — the sheet may not carry a Site Plan with gradient data.</span></div>"
+        )
+
+    STATUS = {
+        "MATCH":      ("#0D2119", "#3FB950", "✓ MATCH"),
+        "MISMATCH":   ("#2A0E0E", "#F85149", "✗ MISMATCH"),
+        "UNLABELLED": ("#1A1525", "#A371F7", "? UNLABELLED"),
+        "INFO":       ("#0D1B2A", "#58A6FF", "· LEVEL"),
+    }
+
+    def badge(status):
+        bg, clr, lbl = STATUS.get(status, STATUS["UNLABELLED"])
+        return (f"<span style='background:{bg};color:{clr};border:1px solid {clr};"
+                f"border-radius:4px;padding:2px 9px;font-size:10px;font-weight:700;"
+                f"white-space:nowrap;'>{lbl}</span>")
+
+    bridge_html = ""
+    if bridges:
+        rows = "".join(
+            f"<div style='padding:4px 0;font-size:12px;color:#E6EDF3;'>"
+            f"🌉 <b>Bridge {b['no']}</b> — CH: {b['ch']:.3f} m &nbsp;"
+            f"<span style='color:#8B949E;font-size:10px;'>(page {b['page']})</span></div>"
+            for b in bridges
+        )
+        bridge_html = (
+            "<div style='background:#161B22;border:1px solid #30363D;border-radius:8px;"
+            f"padding:10px 14px;margin-bottom:14px;'>{rows}</div>"
+        )
+
+    def color_block(cat, label, accent):
+        c = colors.get(cat, {})
+        segs = c.get("segments", [])
+        if not segs:
+            return (f"<div style='margin-bottom:16px;color:#8B949E;font-size:12px;'>"
+                     f"No {label} chainage/RL pairs recognised.</div>")
+        at_bridge = c.get("bridge_segments", {})
+        bridge_ch_by_seg = {}
+        for no, seg in at_bridge.items():
+            bridge_ch_by_seg.setdefault(id(seg), []).append(no)
+
+        rows = ""
+        bridge_by_no = {b["no"]: b for b in bridges}
+        for seg in segs:
+            flag = bridge_ch_by_seg.get(id(seg))
+            ratio_txt = (f"{seg['direction']} 1 in {seg['ratio']:.1f}"
+                         if seg["ratio"] else "LEVEL")
+            bridge_tag = (f"<div style='margin-top:4px;font-size:10px;color:#D29922;'>"
+                          f"🌉 Bridge {', '.join(flag)} falls in this reach</div>"
+                          if flag else "")
+            if flag:
+                d_ch, d_rl = seg["ch2"] - seg["ch1"], seg["rl2"] - seg["rl1"]
+                bits = []
+                for no in flag:
+                    br = bridge_by_no.get(no)
+                    ch_b = br["ch"] if br else seg["ch_mid"]
+                    rl_b = seg["rl1"] + (ch_b - seg["ch1"]) * (d_rl / d_ch) if d_ch else seg["rl1"]
+                    bits.append(f"Br.{no}: CH {ch_b:.3f} → RL {rl_b:.3f} m")
+                centre_txt = "<br>".join(bits)
+            else:
+                centre_txt = f"(mid) CH {seg['ch_mid']:.3f} → RL {seg['rl_mid']:.3f} m"
+            rows += (
+                "<tr style='border-bottom:1px solid #21262D;'>"
+                f"<td style='padding:8px 10px;font-size:12px;color:#E6EDF3;white-space:nowrap;'>"
+                f"CH {seg['ch1']:.3f} → {seg['ch2']:.3f}</td>"
+                f"<td style='padding:8px 10px;font-size:12px;color:#E6EDF3;white-space:nowrap;'>"
+                f"RL {seg['rl1']:.3f} → {seg['rl2']:.3f}</td>"
+                f"<td style='padding:8px 10px;font-size:12px;font-weight:700;color:{accent};"
+                f"white-space:nowrap;'>{ratio_txt}{bridge_tag}</td>"
+                f"<td style='padding:8px 10px;font-size:11px;color:#E6EDF3;white-space:nowrap;'>"
+                f"{centre_txt}</td>"
+                f"<td style='padding:8px 10px;'>{badge(seg['label_status'])}"
+                f"<div style='font-size:10px;color:#8B949E;margin-top:3px;max-width:260px;'>"
+                f"{seg['label_remark']}</div></td>"
+                "</tr>"
+            )
+
+        n_match = sum(1 for s in segs if s["label_status"] == "MATCH")
+        n_mis   = sum(1 for s in segs if s["label_status"] == "MISMATCH")
+        n_unl   = sum(1 for s in segs if s["label_status"] == "UNLABELLED")
+
+        return f"""
+<div style='margin-bottom:18px;'>
+  <div style='display:flex;align-items:center;gap:8px;margin-bottom:6px;'>
+    <span style='width:10px;height:10px;border-radius:50%;background:{accent};display:inline-block;'></span>
+    <span style='font-size:13px;font-weight:700;color:{accent};'>{label}</span>
+    <span style='font-size:10px;color:#8B949E;'>
+      {len(segs)} segment(s) &nbsp;·&nbsp; {n_match} match &nbsp;·&nbsp;
+      {n_mis} mismatch &nbsp;·&nbsp; {n_unl} unlabelled</span>
+  </div>
+  <table style='width:100%;border-collapse:collapse;background:#161B22;border-radius:8px;overflow:hidden;'>
+    <thead><tr style='background:#0D1117;'>
+      <th style='padding:7px 10px;text-align:left;font-size:9px;color:#8B949E;'>CHAINAGE</th>
+      <th style='padding:7px 10px;text-align:left;font-size:9px;color:#8B949E;'>LEVEL (RL)</th>
+      <th style='padding:7px 10px;text-align:left;font-size:9px;color:#8B949E;'>COMPUTED GRADIENT</th>
+      <th style='padding:7px 10px;text-align:left;font-size:9px;color:#8B949E;'>RL @ BRIDGE (CENTRE)</th>
+      <th style='padding:7px 10px;text-align:left;font-size:9px;color:#8B949E;'>VS. DRAWN LABEL</th>
+    </tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</div>"""
+
+    html = f"""
+<html><body style='margin:0;padding:0;font-family:Segoe UI,Arial,sans-serif;
+  background:#0D1117;color:#E6EDF3;padding:14px;'>
+{bridge_html}
+{color_block("EXG", "EXG. GRADIENTS  (black)", "#C9D1D9")}
+{color_block("PRO", "PRO. GRADIENTS  (red)", "#F85149")}
+<div style='padding:6px 0 0;font-size:10px;color:#8B949E;border-top:1px solid #21262D;'>
+  Gradients are auto-calculated from recognised CH:/RL: pairs (Δ RL ÷ Δ CH) and cross-checked
+  against drawn "R/F 1 IN X" labels within ~5% tolerance.
+</div>
+</body></html>"""
+    return html
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Corner-Block Gradient RL Check  (title-block CH/RL/gradient projection)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# GAD / Site Plan sheets carry a small "corner block" (commonly top-right,
+# but position varies) with FIVE components:
+#
+#   1. ONE centre value  — "¢ OF BRIDGE NO. 505 AT CH: 284200.00 m"
+#      This is the bridge/culvert's own chainage — the TARGET chainage we
+#      project every side value onto.
+#   2-5. FOUR CH:/RL: boxes, one to the left and one to the right of the
+#      centre value, plus a near-bridge gradient (ratio + Rising/Falling)
+#      that is the SAME on both sides (see note below):
+#        - BLACK  boxes/labels → EXG. (existing) bridge, left & right side
+#        - RED    boxes/labels → PRO. (proposed) bridge, left & right side
+#
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
+_SIDE_KEYS = ["EXG_LEFT", "EXG_RIGHT", "PRO_LEFT", "PRO_RIGHT"]
+_CAT_KEYS = ["EXG", "PRO"]
+
+# NOTE ON THE GRADIENT MODEL (corrected):
+# The near-bridge approach gradient (ratio + Rising/Falling) is laid as ONE
+# continuous, uniform grade running straight through the bridge — the SAME
+# ratio and the SAME Rise/Fall sense is printed on both the left and right
+# side of the corner block. It is not two independent gradients that happen
+# to match; it's one grade, quoted twice. So we only need ONE (direction,
+# ratio) per colour (EXG / PRO), not one per side.
+#
+# Direction is read relative to the FIXED, physical direction of increasing
+# chainage (the standard railway convention — gradient boards are always
+# read travelling up-kilometrage) — never "towards/away from the bridge",
+# which flips meaning depending which side you're standing on and is what
+# caused the apparent sign error on the right-hand side when each side was
+# (wrongly) treated as an independent value.
+#
+# CHECK LOGIC (same direction+ratio used for both LEFT and RIGHT):
+#   Distance      = CH_target - CH_start        (signed — negative when the
+#                                                  survey point's chainage is
+#                                                  AHEAD of the bridge, i.e.
+#                                                  on the right-hand side)
+#   Delta RL      = Distance / N                 (N = "1 in N" ratio)
+#   RL_target     = RL_start + Delta RL   (Rising / R)
+#   RL_target     = RL_start - Delta RL   (Falling / F)
+# Because Distance is signed (not absolute), this single formula is already
+# correct on BOTH sides without needing a separate sign rule per side —
+# verified against Bridge No. 505 (EXG: CH 282460.00/RL 351.889 and
+# CH 285380.00/RL 364.158, both R 1 in 238, CH_target 284200.00) which lands
+# on RL 359.200 from EITHER side, exactly.
+# The left-side and right-side projections should therefore land on (very
+# nearly) the same RL at the bridge centre-line — any spread beyond
+# tolerance flags a drawing inconsistency (bad CH/RL/gradient figures).
+
+
+def _dominant_ink_rgb(crop) -> tuple:
+    """Median colour of the darker ('ink') pixels in a cropped word/line
+    region, ignoring the near-white paper/screen background. This is more
+    robust than sampling a single pixel — screenshots and scans both have
+    anti-aliased edges around the actual stroke colour."""
+    import numpy as np
+    if crop.size == 0:
+        return (0.0, 0.0, 0.0)
+    flat = crop.reshape(-1, 3).astype(float)
+    brightness = flat.sum(axis=1)
+    lo, hi = brightness.min(), brightness.max()
+    if hi <= lo:
+        return tuple((flat[0] / 255.0).tolist())
+    thresh = lo + (hi - lo) * 0.5
+    ink = flat[brightness <= thresh]
+    if ink.size == 0:
+        ink = flat
+    med = np.median(ink, axis=0) / 255.0
+    return (float(med[0]), float(med[1]), float(med[2]))
+
+
+def _spans_from_pil(img, psm: int = 3) -> tuple:
+    """OCRs a PIL image and returns (spans, width, height, full_text) in the
+    same shape used for native PDF text-spans: {"text","bbox","rgb"}.
+    OCR words are grouped into lines (Tesseract's block/par/line grouping),
+    matching how a native PDF span covers a run of same-style text — the
+    regexes (_CH_RE / _RL_RE / _GRAD_RE / _BRIDGE_CH_RE) run per line.
+
+    psm: Tesseract page-segmentation mode. 11 ("sparse text — find as much
+    text as possible in no particular order") works far better than the
+    default on CAD/GAD sheets, where small text labels sit scattered among
+    dense line-art rather than in paragraph blocks.
+
+    Requires: pillow, pytesseract, numpy, and the Tesseract OCR binary
+    installed and on PATH (e.g. `winget install UB-Mannheim.TesseractOCR`
+    on Windows, or `apt install tesseract-ocr` on Linux).
+    """
+    import numpy as np
+    try:
+        import pytesseract
+    except ImportError as e:
+        raise RuntimeError(
+            "OCR support needs the 'pytesseract' and 'numpy' packages "
+            "(pip install pytesseract numpy) plus the Tesseract OCR engine "
+            "installed separately (not a pip package) — see "
+            "https://github.com/UB-Mannheim/tesseract/wiki for Windows."
+        ) from e
+
+    rgb_img = img.convert("RGB")
+    w, h = rgb_img.size
+    arr = np.asarray(rgb_img)
+
+    config = f"--oem 3 --psm {psm}"
+    data = pytesseract.image_to_data(rgb_img, config=config,
+                                      output_type=pytesseract.Output.DICT)
+    n = len(data["text"])
+    lines: dict[tuple, list[int]] = {}
+    for i in range(n):
+        txt = (data["text"][i] or "").strip()
+        if not txt:
+            continue
+        key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
+        lines.setdefault(key, []).append(i)
+
+    spans, full_lines = [], []
+    for idxs in lines.values():
+        idxs.sort(key=lambda i: data["left"][i])
+        words = [data["text"][i].strip() for i in idxs]
+        line_text = " ".join(words)
+        full_lines.append(line_text)
+        x0 = min(data["left"][i] for i in idxs)
+        y0 = min(data["top"][i] for i in idxs)
+        x1 = max(data["left"][i] + data["width"][i] for i in idxs)
+        y1 = max(data["top"][i] + data["height"][i] for i in idxs)
+        crop = arr[max(y0, 0):max(y1, 1), max(x0, 0):max(x1, 1)]
+        rgb = _dominant_ink_rgb(crop)
+        spans.append({"text": line_text, "bbox": (x0, y0, x1, y1), "rgb": rgb})
+
+    return spans, float(w), float(h), "\n".join(full_lines)
+
+
+def _inverse_rotate_bbox(bbox: tuple, rot: int, crop_w: int, crop_h: int) -> tuple:
+    """Maps a bbox from a rotated crop's coordinate space back to the
+    PRE-rotation crop's coordinate space. crop_w/crop_h are the dimensions
+    of the crop BEFORE rotation. rot is 0, 90 (CCW / Image.ROTATE_90), or
+    270 (CW / Image.ROTATE_270) — matching PIL's transpose() constants."""
+    bx0, by0, bx1, by1 = bbox
+    corners = [(bx0, by0), (bx1, by0), (bx0, by1), (bx1, by1)]
+    pts = []
+    for rx, ry in corners:
+        if rot == 90:      # crop was rotated 90° CCW to make (crop_h, crop_w)
+            x = crop_w - 1 - ry
+            y = rx
+        elif rot == 270:   # crop was rotated 90° CW to make (crop_h, crop_w)
+            x = ry
+            y = crop_h - 1 - rx
+        else:
+            x, y = rx, ry
+        pts.append((x, y))
+    xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _ocr_crop_multi(img, box: tuple, upscale: int = 3, psm: int = 11,
+                     try_rotations: tuple = (0, 90, 270)) -> list:
+    """Heavily up-scaled, rotation-robust OCR of one region of a page.
+    Tries the crop right-way-up AND rotated ±90° (Indian Railway GAD
+    corner-blocks sometimes squeeze the CH:/RL:/gradient labels in reading
+    top-to-bottom to save width), merging whatever each orientation reads.
+    Every returned span's bbox is translated back into the ORIGINAL (un-
+    cropped, un-scaled) page's coordinate space so it can be compared
+    directly against spans from the full-page pass."""
+    from PIL import Image
+    x0, y0, x1, y1 = [int(round(v)) for v in box]
+    x0, y0 = max(x0, 0), max(y0, 0)
+    x1, y1 = min(x1, img.width), min(y1, img.height)
+    if x1 <= x0 or y1 <= y0:
+        return []
+
+    crop = img.crop((x0, y0, x1, y1))
+    if upscale != 1:
+        crop = crop.resize((crop.width * upscale, crop.height * upscale), Image.LANCZOS)
+    cw, ch = crop.size  # dims of the (upscaled) pre-rotation crop
+
+    out = []
+    for rot in try_rotations:
+        if rot == 90:
+            rimg = crop.transpose(Image.ROTATE_90)
+        elif rot == 270:
+            rimg = crop.transpose(Image.ROTATE_270)
+        else:
+            rimg = crop
+        spans, _, _, _ = _spans_from_pil(rimg, psm=psm)
+        for sp in spans:
+            fx0, fy0, fx1, fy1 = _inverse_rotate_bbox(sp["bbox"], rot, cw, ch)
+            out.append({
+                "text": sp["text"],
+                "bbox": (x0 + fx0 / upscale, y0 + fy0 / upscale,
+                         x0 + fx1 / upscale, y0 + fy1 / upscale),
+                "rgb": sp["rgb"],
+            })
+    return out
+
+
+def _ocr_full_and_detail(img) -> tuple:
+    """Two-pass OCR of a full GAD sheet:
+      Pass 1 — sparse-text OCR of the WHOLE sheet (psm 11), mainly to
+        locate the "¢ OF BRIDGE NO... AT CH..." header and get the overall
+        page size / bridge no. / target chainage.
+      Pass 2 — a small, ~3x up-scaled, rotation-robust re-OCR of just the
+        band around that header (full width, generous height either side).
+        The corner-block CH:/RL:/gradient labels are tiny relative to a
+        whole A0/A1 sheet and easily missed at whole-sheet OCR resolution;
+        re-reading just that band at effectively much higher DPI — and
+        trying it rotated in case the labels read top-to-bottom — is far
+        more reliable than raising the whole-sheet OCR resolution (which
+        would make the OCR pass very slow on a large drawing).
+    Returns (spans, width, height, full_text) — full_text is from pass 1
+    only (used for the bridge-header regex); pass-2 spans are appended to
+    the returned spans list for the corner-block field extraction.
+    """
+    spans, w, h, full_text = _spans_from_pil(img, psm=11)
+
+    header_bbox = None
+    for sp in spans:
+        if "BRIDGE" in sp["text"].upper():
+            header_bbox = sp["bbox"]
+            break
+
+    if header_bbox is not None:
+        x0, y0, x1, y1 = header_bbox
+        line_h = max(y1 - y0, 14)
+        crop_box = (0, max(0, y0 - line_h * 2), w, min(h, y0 + line_h * 18))
+        detail = _ocr_crop_multi(img, crop_box, upscale=3, psm=11,
+                                   try_rotations=(0, 90, 270))
+        spans = spans + detail
+
+    return spans, w, h, full_text
+
+
+def _nearest_gradients(grad_spans: list[dict], ref_pos: tuple, cat: str,
+                        page_cx: float, max_dist: float = 260.0) -> list[dict]:
+    """Gradient label spans of the given colour near a reference point,
+    nearest-to-sheet-centre first (i.e. the 'inner'/near-bridge label is
+    returned first — that's the one shared, near-bridge grade)."""
+    cands = [g for g in grad_spans
+              if g["cat"] == cat and _dist(g["pos"], ref_pos) <= max_dist]
+    cands.sort(key=lambda g: abs(g["pos"][0] - page_cx))
+    return cands
+
+
+def _compute_box_rl(ch_start: float, rl_start: float, direction: str,
+                     ratio: float, ch_target: float) -> float:
+    """RL at ch_target, projected from a known (ch_start, rl_start) point
+    along a uniform "1 in ratio" grade. `direction` ("R"=Rising / "F"=
+    Falling) is read relative to the FIXED direction of increasing
+    chainage, so the SAME (direction, ratio) pair is valid from either side
+    of the bridge — the sign of (ch_target - ch_start) does the rest."""
+    distance = ch_target - ch_start
+    delta = distance / ratio
+    return round(rl_start + delta, 3) if direction == "R" else round(rl_start - delta, 3)
+
+
+def _page_spans(path: str):
+    """Yields (page_no, spans, page_width, full_text, extraction) for every
+    page of a PDF or a single image, choosing native text where available
+    and two-pass OCR where it isn't:
+      - PNG/JPG/... input        → OCR directly (full-sheet + detail pass).
+      - PDF page WITH a text layer → native fitz text extraction (fast, exact).
+      - PDF page with NO text layer (a scanned/rasterised sheet, or a PDF
+        made by "print to PDF" from a screenshot) → rendered to an image
+        at 300 DPI and OCR'd (full-sheet + detail pass), same as a raw
+        image would be.
+    """
+    ext = Path(path).suffix.lower()
+    if ext in _IMAGE_EXTS:
+        from PIL import Image
+        img = Image.open(path)
+        spans, w, h, full_text = _ocr_full_and_detail(img)
+        yield 1, spans, w, full_text, "ocr"
+        return
+
+    import fitz
+    doc = fitz.open(path)
+    for pg_no, page in enumerate(doc, start=1):
+        full_text = page.get_text()
+        raw = page.get_text("dict")
+        spans = []
+        for block in raw.get("blocks", []):
+            for line in block.get("lines", []):
+                for sp in line.get("spans", []):
+                    txt = sp.get("text", "").strip()
+                    if not txt:
+                        continue
+                    ci = sp.get("color", 0)
+                    rgb = (((ci >> 16) & 255) / 255.0,
+                           ((ci >> 8) & 255) / 255.0,
+                           (ci & 255) / 255.0)
+                    spans.append({"text": txt, "bbox": sp["bbox"], "rgb": rgb})
+
+        if spans and full_text.strip():
+            yield pg_no, spans, page.rect.width, full_text, "native"
+        else:
+            # No text layer on this page — fall back to OCR on a 300 DPI render.
+            from PIL import Image
+            pix = page.get_pixmap(dpi=300)
+            img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            o_spans, w, h, o_text = _ocr_full_and_detail(img)
+            yield pg_no, o_spans, w, o_text, "ocr"
+    doc.close()
+
+
+def extract_corner_block(path: str) -> dict:
+    """
+    Auto-detects the corner-block data from a GAD sheet (PDF — native text
+    or scanned — or a PNG/JPG screenshot). ALWAYS returns one diagnostic
+    entry per page, even when some or all components could not be found,
+    so the caller can offer manual completion for whatever is missing
+    instead of just failing.
+
+    Per category (EXG / PRO) the near-bridge approach gradient is a SINGLE
+    (direction, ratio) value shared by both the left and right side (see
+    module note above) — so we detect ONE gradient label per colour, not
+    one per side, picking whichever candidate sits closest to the sheet's
+    horizontal centre (i.e. the near-bridge grade, not a further reach).
+
+    Returns:
+      {"pages": [
+          {"page": 1, "bridge_no": "471"|None, "ch_target": 262606.02|None,
+           "extraction": "native"|"ocr",
+           "ch_rl": {"EXG_LEFT": {"ch_start":..,"rl_start":..}|None, ...},
+           "gradients": {"EXG": {"dir":"R","ratio":238.0}|None, "PRO": ...},
+           "missing": ["ch_target", "PRO_RIGHT", "EXG_GRADIENT", ...],
+           "raw_lines": [...]}, ...
+      ]}
+    """
+    results = []
+    for pg_no, spans, page_w, full_text, extraction in _page_spans(path):
+        page_cx = page_w / 2.0
+        m = _BRIDGE_CH_RE.search(full_text)
+        bridge_no = m.group(1).strip().rstrip(".:,") if m else None
+        ch_target = None
+        if m:
+            try:
+                ch_target = float(m.group(2).replace(",", ""))
+            except ValueError:
+                ch_target = None
+
+        ch_spans, rl_spans, grad_spans = [], [], []
+        for sp in spans:
+            txt = sp["text"]
+            if "BRIDGE" in txt.upper():
+                continue  # skip the centre header itself
+            cat = _classify_gradient_color(sp["rgb"])
+            if cat == "OTHER":
+                continue
+            pos = _span_center(sp["bbox"])
+            m_ch, m_rl, m_gr = _CH_RE.search(txt), _RL_RE.search(txt), _GRAD_RE.search(txt)
+            if m_ch:
+                try:
+                    ch_spans.append({"val": float(m_ch.group(1).replace(",", "")),
+                                      "pos": pos, "cat": cat})
+                except ValueError:
+                    pass
+            if m_rl:
+                try:
+                    rl_spans.append({"val": float(m_rl.group(1).replace(",", "")),
+                                      "pos": pos, "cat": cat})
+                except ValueError:
+                    pass
+            if m_gr:
+                try:
+                    grad_spans.append({"dir": m_gr.group(1).upper(),
+                                        "ratio": float(m_gr.group(2).replace(",", "")),
+                                        "pos": pos, "cat": cat, "raw": txt})
+                except ValueError:
+                    pass
+
+        used_rl = set()
+        ch_rl = {k: None for k in _SIDE_KEYS}
+        for chs in ch_spans:
+            best_i, best_d = None, 1e9
+            for i, rls in enumerate(rl_spans):
+                if i in used_rl or rls["cat"] != chs["cat"]:
+                    continue
+                d = _dist(chs["pos"], rls["pos"])
+                if d < best_d:
+                    best_d, best_i = d, i
+            if best_i is None or best_d > 170:
+                continue
+            used_rl.add(best_i)
+            rls = rl_spans[best_i]
+            side = "LEFT" if chs["pos"][0] < page_cx else "RIGHT"
+            key = f'{chs["cat"]}_{side}'
+            if ch_rl.get(key) is not None:
+                continue  # keep first match for this slot
+            ch_rl[key] = {"ch_start": chs["val"], "rl_start": rls["val"], "source": "auto"}
+
+        # ONE shared gradient per colour — pick the candidate nearest the
+        # sheet centre (the near-bridge grade), searched relative to the
+        # page centre itself rather than any one side's box.
+        gradients = {}
+        for cat in _CAT_KEYS:
+            near = _nearest_gradients(grad_spans, (page_cx, 0), cat, page_cx,
+                                       max_dist=page_w)  # search whole width
+            gradients[cat] = ({"dir": near[0]["dir"], "ratio": near[0]["ratio"],
+                                "source": "auto"} if near else None)
+
+        missing = []
+        if ch_target is None:
+            missing.append("ch_target")
+        for key in _SIDE_KEYS:
+            if ch_rl.get(key) is None:
+                missing.append(key)
+        for cat in _CAT_KEYS:
+            if gradients.get(cat) is None:
+                missing.append(f"{cat}_GRADIENT")
+
+        results.append({
+            "page": pg_no, "bridge_no": bridge_no, "ch_target": ch_target,
+            "extraction": extraction, "ch_rl": ch_rl, "gradients": gradients,
+            "missing": missing,
+            # Kept only for diagnostics — every line of text + colour the
+            # OCR/parser actually found, so a still-missing field can be
+            # debugged against what Tesseract really read.
+            "raw_lines": [
+                {"text": sp["text"], "cat": _classify_gradient_color(sp["rgb"])}
+                for sp in spans if sp["text"].strip()
+            ][:400],
+        })
+
+    return {"pages": results}
+
+
+def apply_manual_overrides(data: dict, manual: dict | None) -> dict:
+    """Fills gaps in extract_corner_block()'s output with user-supplied
+    values:
+      manual = {
+        "bridge_no": "471", "ch_target": 262606.02,
+        "ch_rl": {"EXG_LEFT": {"ch_start":.., "rl_start":..}, "EXG_RIGHT": {...},
+                   "PRO_LEFT": {...}, "PRO_RIGHT": {...}},
+        "gradients": {"EXG": {"dir": "R", "ratio": 238}, "PRO": {"dir": "R", "ratio": 240}},
+      }
+    Auto-detected fields are always kept; manual values only fill gaps."""
+    if not manual:
+        return data
+    for pr in data["pages"]:
+        if not pr["missing"]:
+            continue
+        if manual.get("bridge_no") and not pr["bridge_no"]:
+            pr["bridge_no"] = manual["bridge_no"]
+        if manual.get("ch_target") is not None and pr["ch_target"] is None:
+            pr["ch_target"] = manual["ch_target"]
+
+        for key, mb in (manual.get("ch_rl") or {}).items():
+            if key not in _SIDE_KEYS or not mb:
+                continue
+            if pr["ch_rl"].get(key) is None and mb.get("ch_start") is not None \
+                    and mb.get("rl_start") is not None:
+                pr["ch_rl"][key] = {"ch_start": mb["ch_start"], "rl_start": mb["rl_start"],
+                                     "source": "manual"}
+
+        for cat, mg in (manual.get("gradients") or {}).items():
+            if cat not in _CAT_KEYS or not mg:
+                continue
+            if pr["gradients"].get(cat) is None and mg.get("dir") and mg.get("ratio") is not None:
+                pr["gradients"][cat] = {"dir": mg["dir"], "ratio": mg["ratio"], "source": "manual"}
+
+        missing = []
+        if pr["ch_target"] is None:
+            missing.append("ch_target")
+        for key in _SIDE_KEYS:
+            if pr["ch_rl"].get(key) is None:
+                missing.append(key)
+        for cat in _CAT_KEYS:
+            if pr["gradients"].get(cat) is None:
+                missing.append(f"{cat}_GRADIENT")
+        pr["missing"] = missing
+    return data
+
+
+def check_corner_block_rls(path: str, manual: dict | None = None,
+                            tol: float = 0.015) -> dict:
+    """Runs extract_corner_block(), merges any manual overrides, then
+    cross-checks LEFT vs RIGHT projected RL at the bridge centre-line,
+    separately for EXG (black) and PRO (red) — using the ONE shared
+    (direction, ratio) gradient for each colour."""
+    data = extract_corner_block(path)
+    data = apply_manual_overrides(data, manual)
+
+    out_pages = []
+    for pr in data["pages"]:
+        if pr["missing"]:
+            out_pages.append({**pr, "checks": {}, "ready": False})
+            continue
+        ch_target = pr["ch_target"]
+        checks = {}
+        for cat in _CAT_KEYS:
+            grad = pr["gradients"][cat]
+            sides = [pr["ch_rl"][f"{cat}_LEFT"], pr["ch_rl"][f"{cat}_RIGHT"]]
+            computed = []
+            for side_name, b in (("LEFT", sides[0]), ("RIGHT", sides[1])):
+                if not b:
+                    continue
+                rl_t = _compute_box_rl(b["ch_start"], b["rl_start"], grad["dir"],
+                                        grad["ratio"], ch_target)
+                computed.append({"side": side_name, "ch_start": b["ch_start"],
+                                  "rl_start": b["rl_start"], "dir": grad["dir"],
+                                  "ratio": grad["ratio"], "ch_target": ch_target,
+                                  "rl_target_computed": rl_t,
+                                  "source": b.get("source", "auto")})
+            if len(computed) < 2:
+                checks[cat] = {"boxes": computed, "status": "INCOMPLETE",
+                                "remark": "Only one side available."}
+                continue
+            vals = [b["rl_target_computed"] for b in computed]
+            spread = round(max(vals) - min(vals), 3)
+            status = "MATCH" if spread <= tol else "MISMATCH"
+            checks[cat] = {
+                "boxes": computed, "status": status, "spread": spread,
+                "avg_rl": round(sum(vals) / len(vals), 3),
+                "remark": (f"LEFT & RIGHT projections agree within {tol:.3f} m."
+                           if status == "MATCH" else
+                           f"LEFT vs RIGHT projected RL differ by {spread:.3f} m "
+                           f"(> {tol:.3f} m tolerance) — check drawn gradient/CH/RL figures.")
+            }
+        out_pages.append({**pr, "checks": checks, "ready": True})
+
+    return {"pages": out_pages, "tolerance": tol}
+
+
+def _build_corner_block_html(result: dict) -> str:
+    pages = result.get("pages", [])
+    tol = result.get("tolerance", 0.015)
+
+    if not pages:
+        return (
+            "<div style='background:#271D07;border:1px solid #D29922;"
+            "border-radius:10px;padding:20px;font-family:Segoe UI,sans-serif;'>"
+            "<b style='color:#D29922;font-size:14px;'>⚠ No corner-block found</b><br>"
+            "<span style='color:#8B949E;font-size:12px;'>Could not read this sheet at all "
+            "— check the file isn't corrupted.</span></div>"
+        )
+
+    STATUS = {
+        "MATCH":      ("#0D2119", "#3FB950", "✓ MATCH"),
+        "MISMATCH":   ("#2A0E0E", "#F85149", "✗ MISMATCH"),
+        "INCOMPLETE": ("#1A1525", "#A371F7", "? INCOMPLETE"),
+    }
+
+    def badge(status):
+        bg, clr, lbl = STATUS.get(status, STATUS["INCOMPLETE"])
+        return (f"<span style='background:{bg};color:{clr};border:1px solid {clr};"
+                f"border-radius:4px;padding:2px 9px;font-size:10px;font-weight:700;"
+                f"white-space:nowrap;'>{lbl}</span>")
+
+    blocks = ""
+    for pr in pages:
+        extraction_tag = (
+            "<span style='font-size:9px;color:#D29922;font-weight:700;'>OCR</span>"
+            if pr.get("extraction") == "ocr" else
+            "<span style='font-size:9px;color:#8B949E;'>native text</span>")
+
+        if not pr["ready"]:
+            need = ", ".join(pr["missing"])
+            raw_lines = pr.get("raw_lines") or []
+            CAT_CLR = {"EXG": "#C9D1D9", "PRO": "#F85149", "OTHER": "#586069"}
+            raw_html = "".join(
+                f"<div style='color:{CAT_CLR.get(rl['cat'],'#586069')};'>"
+                f"[{rl['cat']}] {html.escape(rl['text'])}</div>"
+                for rl in raw_lines) or "<i>(nothing recognised)</i>"
+            blocks += f"""
+<div style='margin-bottom:18px;background:#271D07;border:1px solid #D29922;
+  border-radius:8px;padding:14px;'>
+  <b style='color:#D29922;font-size:13px;'>⚠ Page {pr['page']} — incomplete
+  ({extraction_tag})</b>
+  <div style='font-size:11px;color:#E6EDF3;margin-top:6px;'>
+    Auto-detected: bridge {pr['bridge_no'] or '—'},
+    target CH {f"{pr['ch_target']:.3f}" if pr['ch_target'] is not None else '—'}.<br>
+    Still missing: <b>{need}</b> — fill these in below and re-run.
+  </div>
+  <div style='font-size:10px;color:#8B949E;margin-top:10px;margin-bottom:3px;'>
+    Raw text the OCR/parser found on this sheet (for debugging — share this
+    if fields keep going missing):
+  </div>
+  <div style='font-family:Consolas,monospace;font-size:10px;background:#0D1117;
+    border:1px solid #30363D;border-radius:6px;padding:8px;max-height:160px;
+    overflow-y:auto;line-height:1.5;'>{raw_html}</div>
+</div>"""
+            continue
+
+        rows = ""
+        for cat, label, accent in (("EXG", "EXG. (black)", "#C9D1D9"),
+                                     ("PRO", "PRO. (red)", "#F85149")):
+            c = pr["checks"].get(cat)
+            if not c:
+                continue
+            box_rows = "".join(
+                f"<div style='font-size:11px;color:{accent};padding:2px 0;'>"
+                f"&nbsp;&nbsp;{b['side']}: CH {b['ch_start']:.3f} → RL {b['rl_start']:.3f} m, "
+                f"{b['dir']} 1 in {b['ratio']:.0f} &nbsp;→&nbsp; RL@CH{b['ch_target']:.0f} = "
+                f"<b>{b['rl_target_computed']:.3f} m</b>"
+                f"{' <i style=\"color:#D29922;\">(manual)</i>' if b.get('source') != 'auto' else ''}"
+                f"</div>" for b in c["boxes"])
+            rows += (
+                "<tr style='border-bottom:1px solid #21262D;'>"
+                f"<td style='padding:8px 10px;font-size:12px;font-weight:700;color:{accent};"
+                f"white-space:nowrap;'>{label}</td>"
+                f"<td style='padding:8px 10px;'>{box_rows}</td>"
+                f"<td style='padding:8px 10px;'>{badge(c['status'])}"
+                f"<div style='font-size:10px;color:#8B949E;margin-top:3px;max-width:240px;'>"
+                f"{c.get('remark','')}</div></td>"
+                "</tr>"
+            )
+        blocks += f"""
+<div style='margin-bottom:18px;'>
+  <div style='font-size:13px;font-weight:700;color:#E6EDF3;margin-bottom:6px;'>
+    🌉 Bridge {pr['bridge_no'] or '?'} — centre-line CH
+    {f"{pr['ch_target']:.3f}" if pr['ch_target'] is not None else '?'} m
+    <span style='font-size:10px;color:#8B949E;font-weight:400;'>
+    (page {pr['page']}, {extraction_tag})</span></div>
+  <table style='width:100%;border-collapse:collapse;background:#161B22;border-radius:8px;overflow:hidden;'>
+    <thead><tr style='background:#0D1117;'>
+      <th style='padding:7px 10px;text-align:left;font-size:9px;color:#8B949E;'>SET</th>
+      <th style='padding:7px 10px;text-align:left;font-size:9px;color:#8B949E;'>LEFT / RIGHT PROJECTION</th>
+      <th style='padding:7px 10px;text-align:left;font-size:9px;color:#8B949E;'>CROSS-CHECK</th>
+    </tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</div>"""
+
+    return f"""
+<html><body style='margin:0;padding:0;font-family:Segoe UI,Arial,sans-serif;
+  background:#0D1117;color:#E6EDF3;padding:14px;'>
+{blocks}
+<div style='padding:6px 0 0;font-size:10px;color:#8B949E;border-top:1px solid #21262D;'>
+  RL@bridge-CH is projected from each side's CH:/RL: point (RL_start ± (CH_target-CH_start)/N)
+  using the ONE shared near-bridge gradient for that colour (same value used for both sides,
+  read relative to increasing chainage); LEFT vs RIGHT are cross-checked to ±{tol:.3f} m.
+  PDF pages with no text layer, and PNG/JPG files, are read via OCR.
+</div>
+</body></html>"""
+
+
+def run_corner_block_check(path: str, manual: dict | None = None) -> dict:
+    """Top-level entry point used by the Scrutiny panel. Accepts a PDF or an
+    image (PNG/JPG/...). Pass `manual` to fill in fields the auto-detector
+    couldn't trace (see apply_manual_overrides for the expected shape)."""
+    return check_corner_block_rls(path, manual=manual)
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Scrutiny — Vertical Clearance Calculator
 # ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Loop Interface — eDAS auto-login & keep-alive
+# ─────────────────────────────────────────────────────────────────────────────
+# NOTE: field/button selectors below are best-effort placeholders. eDAS is a
+# login-gated site so the actual DOM couldn't be inspected while building
+# this — open the login page once, check the real field names/ids with
+# browser dev-tools, and adjust the By.* selectors in _login() if they don't
+# match. Everything else (loop, keep-alive, captcha solving) is selector-
+# independent and needs no changes.
+
+EDAS_URL       = "https://edas.rcil.gov.in/auth/login2"
+EDAS_USER_DEF  = "DYCE-C-DESIGN-SCR"
+EDAS_PASS_DEF  = "Dcedscr@123"
+LI_REFRESH_SEC = 2
+
+
+def _edas_creds() -> tuple[str, str]:
+    """Credentials from QSettings if the user has overridden them there,
+    else the defaults above — same precedence pattern as _load_keys()."""
+    s = QSettings("BES", "BridgeEngineeringSuite")
+    u = str(s.value("edas_username", "") or "").strip() or EDAS_USER_DEF
+    p = str(s.value("edas_password", "") or "").strip() or EDAS_PASS_DEF
+    return u, p
+
+
+# ── shared eDAS session helpers (used by LoopInterfaceWorker AND
+#    StatusUpdationWorker so both drive the login/captcha flow identically) ──
+
+def _edas_browser_alive(driver) -> bool:
+    try:
+        _ = driver.title
+        return True
+    except Exception:
+        return False
+
+
+def _edas_is_logged_in(driver) -> bool:
+    try:
+        url = driver.current_url.lower()
+        return "login" not in url and "auth" not in url
+    except Exception:
+        return False
+
+
+def _edas_minimize(driver):
+    """Keep the automation out of the user's way — Selenium drives the
+    page over the WebDriver protocol so this works even minimized."""
+    try:
+        driver.minimize_window()
+    except Exception:
+        pass
+
+
+def _edas_solve_captcha_text(text: str):
+    m = re.search(r"(\d+)\s*([+\-x×*])\s*(\d+)", text)
+    if not m:
+        return None
+    a, op, b = int(m.group(1)), m.group(2), int(m.group(3))
+    if op == "+":            return a + b
+    if op == "-":            return a - b
+    return a * b
+
+
+def _edas_solve_captcha_ai(driver, log_fn=lambda *a: None):
+    """Fallback if the equation can't be regex-parsed from page text —
+    screenshots the whole viewport and asks the AI to read/solve it."""
+    claude_key, gemini_key = _load_keys()
+    if not (claude_key or gemini_key):
+        return None
+    b64 = base64.b64encode(driver.get_screenshot_as_png()).decode()
+    prompt = ("This is a login page with an arithmetic captcha challenge "
+              "(labelled 'Solve'). Find the equation and solve it. "
+              "Reply with ONLY the final number, nothing else.")
+    try:
+        if gemini_key:
+            from gui.ai_provider import AIProvider, PROVIDER_GEMINI
+            ai  = AIProvider(gemini_key, PROVIDER_GEMINI)
+            raw = ai.vision(system="You solve simple arithmetic captchas.",
+                             image_b64=b64, mime="image/png",
+                             user=prompt, max_tokens=20)
+        else:
+            import anthropic
+            from gui.ai_provider import ANTHROPIC_MODEL, _anthropic_text
+            client = anthropic.Anthropic(api_key=claude_key)
+            resp = client.messages.create(
+                model=ANTHROPIC_MODEL, max_tokens=20,
+                messages=[{"role": "user", "content": [
+                    {"type": "image", "source": {"type": "base64",
+                      "media_type": "image/png", "data": b64}},
+                    {"type": "text", "text": prompt}]}])
+            raw = _anthropic_text(resp).strip()
+        m = re.search(r"-?\d+", raw)
+        return int(m.group()) if m else None
+    except Exception as e:
+        log_fn(f"AI captcha solve failed: {e}", "warn")
+        return None
+
+
+def _edas_login(driver, log_fn=lambda *a: None) -> bool:
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+
+    user, pwd = _edas_creds()
+    wait = WebDriverWait(driver, 15)
+    try:
+        driver.get(EDAS_URL)
+        # Fields have no name/id — matched by placeholder text instead
+        # (English half of the bilingual placeholder, so it's stable
+        # even if the Hindi text changes).
+        uf = wait.until(EC.presence_of_element_located(
+            (By.XPATH, "//input[contains(@placeholder,'Username')]")))
+        pf = driver.find_element(
+            By.XPATH, "//input[contains(@placeholder,'Password')]"
+        )
+        def _wipe_field(el):
+            """If the field is pre-filled (browser autofill / saved values),
+            wipe it reliably — some pages ignore element.clear(), so fall
+            back to select-all + delete."""
+            from selenium.webdriver.common.keys import Keys
+            if el.get_attribute("value"):
+                el.clear()
+                el.send_keys(Keys.CONTROL, "a")
+                el.send_keys(Keys.DELETE)
+                time.sleep(0.3)
+                # Double-check: if still has value, force-clear via JS
+                if el.get_attribute("value"):
+                    driver.execute_script("arguments[0].value='';", el)
+                    time.sleep(0.2)
+
+        # MUST CHECK: if fields have autofilled data, clear it first
+        uf_val = uf.get_attribute("value") or ""
+        pf_val = pf.get_attribute("value") or ""
+        if uf_val.strip():
+            log_fn(f"🧹 Autofilled username detected ('{uf_val.strip()[:8]}...') — clearing.", "warn")
+        if pf_val.strip():
+            log_fn("🧹 Autofilled password detected — clearing.", "warn")
+
+        _wipe_field(uf); uf.send_keys(user)
+        _wipe_field(pf); pf.send_keys(pwd)
+    except Exception as e:
+        log_fn(f"⚠ Could not find username/password fields: {e}", "err")
+        return False
+
+    # Arithmetic captcha — e.g. "Solve / हल करें : 3 * 1 = ?"
+    try:
+        try:
+            capt_text = driver.find_element(
+                By.XPATH, "//*[contains(text(),'Solve')]").text
+        except Exception:
+            capt_text = driver.find_element(By.TAG_NAME, "body").text
+        answer = _edas_solve_captcha_text(capt_text) or _edas_solve_captcha_ai(driver, log_fn)
+        if answer is not None:
+            cf = driver.find_element(
+                By.XPATH, "//input[contains(@placeholder,'solved') or "
+                          "contains(@placeholder,'उत्तर')]")
+            cf.clear(); cf.send_keys(str(answer))
+            log_fn(f"🧮 Captcha solved → {answer}", "ok")
+        else:
+            log_fn("⚠ Could not read the captcha equation.", "warn")
+    except Exception as e:
+        log_fn(f"⚠ Captcha step failed: {e}", "warn")
+
+    try:
+        btn = driver.find_element(By.XPATH, "//button[contains(., 'LOGIN')]")
+        btn.click()
+    except Exception as e:
+        log_fn(f"⚠ Could not click login button: {e}", "err")
+        return False
+
+    time.sleep(2)
+    ok = _edas_is_logged_in(driver)
+    log_fn("✅ Logged in to eDAS." if ok else
+           "⚠ Login submitted but dashboard not detected.", "ok" if ok else "warn")
+    return ok
+
+
+class LoopInterfaceWorker(QThread):
+    """Opens eDAS in Edge, logs in (solving the arithmetic captcha), then
+    keeps the session alive by refreshing every LI_REFRESH_SEC seconds and
+    re-logging in automatically if the session drops — until stop() is
+    called or the browser window is closed manually."""
+
+    log     = pyqtSignal(str, str)   # message, level
+    stopped = pyqtSignal(str)        # reason: "user_stop" | "browser_closed" | "error"
+
+    def __init__(self):
+        super().__init__()
+        self._stop_evt = threading.Event()
+        self.driver = None
+
+    def stop(self):
+        self._stop_evt.set()
+
+    def _log(self, msg, level="info"):
+        self.log.emit(msg, level)
+
+    # ── lifecycle ──────────────────────────────────────────────────────
+    def run(self):
+        try:
+            self._run_inner()
+        except Exception as e:
+            import traceback
+            self._log(f"Fatal error: {e}", "err")
+            print(traceback.format_exc())
+            self.stopped.emit("error")
+        finally:
+            try:
+                if self.driver:
+                    self.driver.quit()
+            except Exception:
+                pass
+
+    def _open_browser(self):
+        from selenium import webdriver
+        from selenium.webdriver.edge.options import Options as EdgeOptions
+        opts = EdgeOptions()
+        opts.add_experimental_option("detach", True)   # survives if driver handle dies
+        self.driver = webdriver.Edge(options=opts)
+        self.driver.set_window_size(1280, 900)
+        _edas_minimize(self.driver)   # minimized from the start — never on-screen
+        self._log("🌐 Edge launched (minimized) — working in the background.", "ok")
+
+    # ── main loop ──────────────────────────────────────────────────────
+    def _run_inner(self):
+        self._open_browser()
+        logged_in = _edas_login(self.driver, self._log)
+        if not logged_in:
+            self._log("Retrying login on next cycle…", "warn")
+
+        while not self._stop_evt.is_set():
+            if not _edas_browser_alive(self.driver):
+                self._log("🛑 Browser window closed — stopping.", "warn")
+                self.stopped.emit("browser_closed")
+                return
+            if not _edas_is_logged_in(self.driver):
+                self._log("🔁 Session dropped — logging in again…", "warn")
+                _edas_login(self.driver, self._log)
+            else:
+                try:
+                    self.driver.refresh()
+                except Exception:
+                    pass
+            self._stop_evt.wait(LI_REFRESH_SEC)
+
+        self._log("⏹ Loop Interface stopped.", "info")
+        self.stopped.emit("user_stop")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Status Updation — All Drawings ↔ Google Sheet sync
+# ─────────────────────────────────────────────────────────────────────────────
+# NOTE (same caveat as Loop Interface): the All-Drawings table and the
+# Members modal DOM could only be inspected from screenshots, not live —
+# the XPath selectors below are matched against what's visible in those
+# screenshots (placeholder text, column order, badge text pattern) and may
+# need small tweaks once run against the live page. The Google Sheets
+# selectors (Name Box #t-name-box, formula bar) are Google's own stable,
+# long-standing element ids and are unlikely to need changes.
+
+def _short_drawing_id(full_id: str) -> str:
+    """Extract the short numerical drawing ID from a full eDAS Drawing ID.
+    E.g. 'GM(W)-SCR-BRIDGES -TRACK-CON SC-DUU-407-2025' → '407-2025'.
+    If no pattern matches, returns the original string unchanged."""
+    # Match trailing digits-digits pattern like 407-2025, 12-2024, 1234-2025
+    m = re.search(r'(\d{1,6}-(?:19|20)\d{2})\s*$', full_id.strip())
+    if m:
+        return m.group(1)
+    # Fallback: match the last two hyphen-separated numeric segments
+    m = re.search(r'(\d[\d-]*\d)\s*$', full_id.strip())
+    if m and any(c.isdigit() for c in m.group(1)):
+        return m.group(1)
+    return full_id
+
+
+GOOGLE_SHEET_URL = (
+    "https://docs.google.com/spreadsheets/d/"
+    "1rj_hOPCON6KbMq0BE9M6rn0OIRG1EFhgnb-YvoXFmy8/edit?gid=1766497510#gid=1766497510"
+)
+SU_CHAR_DELAY      = 2.0    # per-character typing delay in the eDAS search box
+                             # — minimum 2 seconds between each keystroke
+SU_TRIO_PAUSE      = 10.0   # extra pause after every 3rd character typed (10s)
+SU_SPACE_SETTLE    = 1.0    # pause before the trailing space after a bridge no.
+SU_RESULT_WAIT     = 20.0   # max seconds to poll for the results table to settle
+SU_MIN_RESULT_WAIT = 10.0   # always allow at least this long for results to appear
+# Second Check uses even longer delays to give slow pages more time
+SU2_CHAR_DELAY     = 3.0    # per-character delay for second check
+SU2_TRIO_PAUSE     = 15.0   # extra pause after every 3rd character (second check)
+SU2_RESULT_WAIT    = 25.0   # max seconds to poll (second check)
+SU2_MIN_RESULT_WAIT= 15.0   # minimum settle time (second check)
+SU_MAX_RETRIES     = 3
+SU_ROW_START       = 5      # first data row in the sheet (row 4 is the header)
+SU_COL_BRNO        = "B"
+SU_COL_DRAWING_ID  = "C"
+SU_COL_GAD_SUBMIT  = "F"
+SU_COL_STAGE       = "G"
+SU_COL_DESIGN_SEC  = "H"
+SU_COL_CBE_OFFICE  = "I"
+SU_COL_REMARKS     = "J"
+
+
+def _su_edge_profile_dir() -> str:
+    """A dedicated, isolated Edge profile just for this automation — separate
+    from the user's real everyday profile, so it never opens their normal
+    startup tabs/homepage/extensions and never conflicts with their regular
+    Edge being open. It's persistent on disk, so Google sign-in here only
+    ever needs to happen once."""
+    base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+    path = os.path.join(base, "BES", "automation_profile")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+class StatusUpdationWorker(QThread):
+    """Walks every Br.No already listed in the Google Sheet, looks it up in
+    eDAS All Drawings, and fills in Drawing ID / Work Flow Stage / Design
+    Section / CBE-Office / Remarks accordingly. Runs until it reaches the
+    last populated row, stop() is called, or the browser is closed."""
+
+    log      = pyqtSignal(str, str)
+    progress = pyqtSignal(int, int)   # current row, last row
+    stopped  = pyqtSignal(str)
+
+    def __init__(self, second_check=False):
+        super().__init__()
+        self._stop_evt = threading.Event()
+        self.driver = None
+        self._edas_handle = None
+        self._sheet_handle = None
+        self._second_check = second_check
+        # Use longer delays for second check
+        if second_check:
+            self._char_delay = SU2_CHAR_DELAY
+            self._trio_pause = SU2_TRIO_PAUSE
+
+    def stop(self):
+        self._stop_evt.set()
+
+    def _log(self, msg, level="info"):
+        self.log.emit(msg, level)
+
+    # ── lifecycle ──────────────────────────────────────────────────────
+    def run(self):
+        try:
+            self._run_inner()
+        except Exception as e:
+            import traceback
+            self._log(f"Fatal error: {e}", "err")
+            print(traceback.format_exc())
+            self.stopped.emit("error")
+        finally:
+            try:
+                if self.driver:
+                    self.driver.quit()
+            except Exception:
+                pass
+
+    def _open_browser(self) -> bool:
+        from selenium import webdriver
+        from selenium.webdriver.edge.options import Options as EdgeOptions
+
+        opts = EdgeOptions()
+        opts.add_experimental_option("detach", True)
+        opts.add_argument(f"--user-data-dir={_su_edge_profile_dir()}")
+        opts.add_argument("--profile-directory=Default")
+        # Strip the fingerprints Google's login page uses to flag/block an
+        # automated browser — this (not reusing a real profile) is the
+        # actual fix for the "browser may not be secure" block.
+        opts.add_experimental_option("excludeSwitches", ["enable-automation"])
+        opts.add_experimental_option("useAutomationExtension", False)
+        opts.add_argument("--disable-blink-features=AutomationControlled")
+        # Suppress Edge's "restore pages?" crash-recovery bubble — after an
+        # unclean shutdown it otherwise steals focus from new tabs and can
+        # make them die before Selenium can drive them.
+        opts.add_argument("--hide-crash-restore-bubble")
+        try:
+            self.driver = webdriver.Edge(options=opts)
+        except Exception as e:
+            self._log(f"⚠ Could not launch the automation browser: {e}", "err")
+            return False
+        self.driver.set_window_size(1400, 900)
+        self._edas_handle = self.driver.current_window_handle
+        _edas_minimize(self.driver)   # minimized from the start — never on-screen
+        self._log("🌐 Edge launched (isolated profile, minimized).", "ok")
+        return True
+
+    def _open_sheet_tab(self):
+        self.driver.switch_to.new_window('tab')
+        self._sheet_handle = self.driver.current_window_handle
+        self.driver.get(GOOGLE_SHEET_URL)
+        time.sleep(3)
+        if "accounts.google.com" in self.driver.current_url:
+            try:
+                self.driver.maximize_window()   # visible only for this one-time step
+            except Exception:
+                pass
+            self._log("👤 One-time Google sign-in needed — please sign in inside "
+                       "the automated Edge window. This is saved permanently after "
+                       "today; it will minimize itself once you're signed in.", "warn")
+            waited = 0
+            while "accounts.google.com" in self.driver.current_url and waited < 300:
+                if self._stop_evt.is_set():
+                    return False
+                time.sleep(2); waited += 2
+            if "accounts.google.com" in self.driver.current_url:
+                self._log("⚠ Timed out waiting for Google sign-in.", "err")
+                return False
+            self._log("✅ Signed in — this won't be needed again.", "ok")
+            time.sleep(2)
+            _edas_minimize(self.driver)
+        self._log("📊 Sheet opened.", "ok")
+        return True
+
+    # ── eDAS: All Drawings search ────────────────────────────────────────
+    def _goto_all_drawings(self):
+        from selenium.webdriver.common.by import By
+        try:
+            if "all" in self.driver.current_url.lower() or \
+               self.driver.find_elements(By.XPATH, "//input[contains(@placeholder,'Keyword')]"):
+                return True
+        except Exception:
+            pass
+        try:
+            nav = self.driver.find_element(By.XPATH, "//*[contains(text(),'All Drawings')]")
+            nav.click()
+            time.sleep(2)
+            return True
+        except Exception as e:
+            self._log(f"⚠ Could not open All Drawings: {e}", "err")
+            return False
+
+    def _type_slowly(self, element, text, trailing_space=False):
+        """Very deliberate typing pace: configurable delay between characters,
+        plus an extra pause after every third character — eDAS's live
+        search-as-you-type drops keystrokes when it can't keep up.
+        After trailing space, waits for results or 10s whichever is earliest."""
+        element.clear()
+        char_delay = getattr(self, '_char_delay', SU_CHAR_DELAY)
+        trio_pause = getattr(self, '_trio_pause', SU_TRIO_PAUSE)
+        for i, ch in enumerate(text):
+            element.send_keys(ch)
+            time.sleep(char_delay)
+            if (i + 1) % 3 == 0 and i + 1 < len(text):
+                self._log(f"  ⏳ Pausing {trio_pause:.0f}s after {(i+1)} characters…", "info")
+                time.sleep(trio_pause)
+        if trailing_space:
+            time.sleep(SU_SPACE_SETTLE)
+            element.send_keys(" ")
+            # After trailing space, wait for page to load or 10 seconds, whichever is earliest
+            self._log("  ⏳ Waiting for search results after space…", "info")
+            from selenium.webdriver.common.by import By
+            settled = False
+            for waited in range(10):
+                time.sleep(1.0)
+                try:
+                    rows = self.driver.find_elements(By.XPATH, "//table//tbody/tr")
+                    if len(rows) > 0:
+                        settled = True
+                        self._log(f"  ✅ Results loaded after {waited+1}s.", "ok")
+                        break
+                except Exception:
+                    pass
+            if not settled:
+                self._log("  ⏳ 10s timeout reached, proceeding.", "warn")
+        time.sleep(1.0)  # let the results table start updating
+
+    def _wait_results_settled(self):
+        """eDAS's search-as-you-type needs a moment to catch up — poll the
+        row count until it stops changing (or timeout). Uses longer waits
+        for second_check mode."""
+        from selenium.webdriver.common.by import By
+        result_wait = SU2_RESULT_WAIT if self._second_check else SU_RESULT_WAIT
+        min_wait = SU2_MIN_RESULT_WAIT if self._second_check else SU_MIN_RESULT_WAIT
+        last_count, stable_ticks = -1, 0
+        waited = 0.0
+        while waited < result_wait:
+            try:
+                count = len(self.driver.find_elements(By.XPATH, "//table//tbody/tr"))
+            except Exception:
+                count = 0
+            if count == last_count:
+                stable_ticks += 1
+                if stable_ticks >= 2:
+                    return
+            else:
+                stable_ticks = 0
+            last_count = count
+            time.sleep(0.5); waited += 0.5
+        # Even if the row count looked stable early, give the grid the full
+        # minimum window to surface late-arriving results.
+        if waited < min_wait:
+            time.sleep(min_wait - waited)
+
+    def _extract_result_rows(self):
+        """Parses the visible All Drawings table. Column order assumed from
+        the screenshots: Drawing ID, Description, Name Of Work, Workflow
+        Name, Project Name, Drawing Details, Workflow Stage, Latest
+        Activity, Actions (eye icon)."""
+        from selenium.webdriver.common.by import By
+        rows = []
+        try:
+            trs = self.driver.find_elements(By.XPATH, "//table//tbody/tr")
+        except Exception:
+            return rows
+        for tr in trs:
+            try:
+                tds = tr.find_elements(By.TAG_NAME, "td")
+                if len(tds) < 8:
+                    continue
+                drawing_id = tds[1].text.strip()
+                description = tds[2].text.strip()
+                name_of_work = tds[3].text.strip()
+                workflow_name = tds[4].text.strip()
+                project_name = tds[5].text.strip()
+                stage = tds[7].text.strip()
+                latest_activity = tds[8].text.strip() if len(tds) > 8 else ""
+                eye_el = None
+                try:
+                    eye_el = tr.find_element(By.XPATH, ".//button|.//*[name()='svg']")
+                except Exception:
+                    pass
+                rows.append({
+                    "drawing_id": drawing_id, "description": description,
+                    "name_of_work": name_of_work, "workflow_name": workflow_name,
+                    "project_name": project_name, "stage": stage,
+                    "latest_activity": latest_activity, "row_el": tr, "eye_el": eye_el,
+                })
+            except Exception:
+                continue
+        return rows
+
+    def _search_edas(self, query, trailing_space=False):
+        from selenium.webdriver.common.by import By
+        self.driver.switch_to.window(self._edas_handle)
+        if not self._goto_all_drawings():
+            return []
+        try:
+            box = self.driver.find_element(
+                By.XPATH, "//input[contains(@placeholder,'Keyword')]")
+        except Exception as e:
+            self._log(f"⚠ Could not find the keyword search box: {e}", "err")
+            return []
+        self._type_slowly(box, query, trailing_space=trailing_space)
+        self._wait_results_settled()
+        return self._extract_result_rows()
+
+    def _matches_keywords(self, row) -> bool:
+        text = " ".join([row["drawing_id"], row["description"], row["name_of_work"],
+                          row["workflow_name"], row["project_name"]]).lower()
+        return "duu" in text and "dhne" in text and "sc" in text
+
+    def _pick_row(self, rows, filter_keywords: bool):
+        candidates = [r for r in rows if self._matches_keywords(r)] if filter_keywords else rows
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0]
+        # tie-break: most recent Latest Activity text, best-effort string compare
+        return sorted(candidates, key=lambda r: r["latest_activity"], reverse=True)[0]
+
+    # ── eDAS: Members modal ──────────────────────────────────────────────
+    def _read_members(self, row):
+        """Clicks the row's eye icon, opens Members, parses badges like
+        'CBE-SCR (Sunil Kumar Verma) (Approved)', then closes the modal.
+        Returns a list of (role, name, status) tuples."""
+        from selenium.webdriver.common.by import By
+        members = []
+        try:
+            eye = row.get("eye_el") or row["row_el"].find_element(By.XPATH, ".//button")
+            eye.click()
+            time.sleep(1.5)
+            tab = self.driver.find_element(By.XPATH, "//*[contains(text(),'Members')]")
+            tab.click()
+            time.sleep(1.0)
+            badge_els = self.driver.find_elements(
+                By.XPATH, "//*[contains(text(),'(') and contains(text(),')')]")
+            pat = re.compile(r"([\w\-]+)\s*\(([^)]+)\)\s*\(([^)]+)\)")
+            for el in badge_els:
+                m = pat.search(el.text.strip())
+                if m:
+                    members.append((m.group(1).strip(), m.group(2).strip(), m.group(3).strip()))
+            try:
+                close_btn = self.driver.find_element(By.XPATH, "//button[contains(.,'Close')]")
+                close_btn.click()
+            except Exception:
+                pass
+        except Exception as e:
+            self._log(f"⚠ Could not read Members panel: {e}", "warn")
+        return members
+
+    # ── Google Sheets ─────────────────────────────────────────────────────
+    def _sheet_goto(self, cell_ref):
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.common.keys import Keys
+        self.driver.switch_to.window(self._sheet_handle)
+        name_box = self.driver.find_element(By.ID, "t-name-box")
+        name_box.click()
+        name_box.send_keys(f"{Keys.CONTROL}a")
+        name_box.send_keys(cell_ref)
+        name_box.send_keys(Keys.ENTER)
+        time.sleep(0.4)
+
+    def _sheet_read(self, cell_ref) -> str:
+        from selenium.webdriver.common.by import By
+        self._sheet_goto(cell_ref)
+        try:
+            bar = self.driver.find_element(By.ID, "t-formula-bar-input")
+            return (bar.text or bar.get_attribute("value") or "").strip()
+        except Exception:
+            return ""
+
+    def _sheet_write(self, cell_ref, value):
+        from selenium.webdriver.common.keys import Keys
+        if not value:
+            return
+        self._sheet_goto(cell_ref)
+        active = self.driver.switch_to.active_element
+        text = ("'" + value) if value.startswith("=") else value
+        active.send_keys(text)
+        active.send_keys(Keys.ENTER)
+        time.sleep(0.3)
+
+    def _sheet_set_checkbox(self, cell_ref, checked: bool):
+        from selenium.webdriver.common.keys import Keys
+        self._sheet_goto(cell_ref)
+        active = self.driver.switch_to.active_element
+        active.send_keys("TRUE" if checked else "FALSE")
+        active.send_keys(Keys.ENTER)
+        time.sleep(0.3)
+
+    def _find_last_row(self) -> int:
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.common.keys import Keys
+        self._sheet_goto(f"{SU_COL_BRNO}{SU_ROW_START}")
+        name_box = self.driver.find_element(By.ID, "t-name-box")
+        name_box.click()
+        name_box.send_keys(f"{Keys.CONTROL}a")
+        name_box.send_keys(f"{SU_COL_BRNO}{SU_ROW_START}")
+        name_box.send_keys(Keys.ENTER)
+        time.sleep(0.3)
+        active = self.driver.switch_to.active_element
+        active.send_keys(Keys.CONTROL, Keys.DOWN)
+        time.sleep(0.4)
+        ref = self.driver.find_element(By.ID, "t-name-box").get_attribute("value") or ""
+        m = re.search(r"(\d+)$", ref)
+        return int(m.group(1)) if m else SU_ROW_START
+
+    # ── main loop ──────────────────────────────────────────────────────
+    def _process_row(self, row_n: int, brno: str):
+        """Search eDAS for one bridge number and write results back to its
+        sheet row. Logic unchanged — extracted verbatim from the run loop so
+        a mid-row failure can be recovered without losing the whole pass."""
+        self._ensure_edas_session()
+        existing_id = self._sheet_read(f"{SU_COL_DRAWING_ID}{row_n}")
+
+        rows, attempts = [], 0
+        picked = None
+        while attempts < SU_MAX_RETRIES and not picked:
+            if existing_id:
+                rows = self._search_edas(existing_id, trailing_space=False)
+                picked = self._pick_row(rows, filter_keywords=False)
+            else:
+                rows = self._search_edas(brno, trailing_space=True)
+                picked = self._pick_row(rows, filter_keywords=True)
+            attempts += 1
+            if not picked:
+                self._ensure_edas_session()
+
+        if not picked:
+            self._log(f"Br.No {brno}: no drawing found — clearing GAD-submitted tick.", "warn")
+            self._sheet_set_checkbox(f"{SU_COL_GAD_SUBMIT}{row_n}", False)
+            return
+
+        short_id = _short_drawing_id(picked["drawing_id"])
+        self._sheet_write(f"{SU_COL_DRAWING_ID}{row_n}", short_id)
+        stage = picked["stage"]
+        self._sheet_write(f"{SU_COL_STAGE}{row_n}", stage)
+        stage_l = stage.lower()
+
+        members = []
+        if "chq" in stage_l or "hq" in stage_l:
+            self.driver.switch_to.window(self._edas_handle)
+            members = self._read_members(picked)
+            names_joined = " ; ".join(f"{r} ({n})" for r, n, _ in members)
+
+            if "chq" in stage_l:
+                self._sheet_write(f"{SU_COL_DESIGN_SEC}{row_n}", names_joined)
+
+            if "hq" in stage_l:
+                self._sheet_write(f"{SU_COL_CBE_OFFICE}{row_n}",
+                                   f"{stage} | {names_joined}")
+
+            if "hq-approval1" in stage_l.replace(" ", "").replace("_", "-"):
+                if members and all(s.lower() == "approved" for _, _, s in members):
+                    self._sheet_write(f"{SU_COL_REMARKS}{row_n}", "CBE-Approved")
+
+        self._log(f"Br.No {brno}: {picked['drawing_id']} → {stage}", "ok")
+
+    def _recover_windows(self) -> bool:
+        """A tab/window died mid-run — re-anchor our handles to whatever Edge
+        still has open and restore whichever page is missing. Returns False
+        only when the browser itself is gone."""
+        from selenium.common.exceptions import WebDriverException
+        try:
+            handles = list(self.driver.window_handles)
+        except WebDriverException:
+            return False   # browser process gone entirely
+
+        def valid(h):
+            try:
+                self.driver.switch_to.window(h)
+                self.driver.title
+                return True
+            except Exception:
+                return False
+
+        handles = [h for h in handles if valid(h)]
+        if not handles:
+            return False
+
+        if self._edas_handle not in handles:
+            self._edas_handle = None
+        if self._sheet_handle not in handles or self._sheet_handle == self._edas_handle:
+            self._sheet_handle = None
+
+        if not self._edas_handle:
+            self._edas_handle = handles[0]
+        if not self._sheet_handle:
+            if not self._open_sheet_tab():
+                return False
+
+        self.driver.switch_to.window(self._edas_handle)
+        _edas_login(self.driver, self._log)
+        return True
+
+    def _ensure_edas_session(self):
+        self.driver.switch_to.window(self._edas_handle)
+        if not _edas_is_logged_in(self.driver):
+            self._log("🔁 eDAS session dropped — logging in again…", "warn")
+            _edas_login(self.driver, self._log)
+
+    def _run_inner(self):
+        if not self._open_browser():
+            self.stopped.emit("error")
+            return
+        # Login with retries — a misread captcha or a crashed tab shouldn't
+        # abort the whole run before it even starts.
+        for attempt in range(1, 4):
+            try:
+                if _edas_login(self.driver, self._log):
+                    break
+            except Exception as e:
+                self._log(f"⚠ Login attempt {attempt} failed ({type(e).__name__}).", "warn")
+            if attempt < 3:
+                time.sleep(3)
+                try:                      # if the tab died mid-login, open a fresh one
+                    _ = self.driver.current_url
+                except Exception:
+                    self.driver.switch_to.new_window("tab")
+                    self._edas_handle = self.driver.current_window_handle
+        if not self._open_sheet_tab():
+            self.stopped.emit("error")
+            return
+
+        last_row = self._find_last_row()
+        self._log(f"📋 Found bridge rows {SU_ROW_START}–{last_row}.", "info")
+
+        mode_label = "Second Check" if self._second_check else "Status Updation"
+        self._log(f"📋 {mode_label}: Scanning rows {SU_ROW_START}–{last_row}.", "info")
+
+        skipped_count = 0
+        processed_count = 0
+        for row_n in range(SU_ROW_START, last_row + 1):
+            if self._stop_evt.is_set():
+                break
+            if not _edas_browser_alive(self.driver):
+                self._log("🛑 Browser closed — stopping.", "warn")
+                self.stopped.emit("browser_closed")
+                return
+
+            self.progress.emit(row_n, last_row)
+            brno = self._sheet_read(f"{SU_COL_BRNO}{row_n}")
+            if not brno:
+                continue
+
+            # Second Check: only process rows WITHOUT a GAD submitted tick
+            if self._second_check:
+                gad_tick = self._sheet_read(f"{SU_COL_GAD_SUBMIT}{row_n}")
+                if gad_tick.strip().upper() in ("TRUE", "YES", "✓", "T"):
+                    skipped_count += 1
+                    continue
+
+            try:
+                self._process_row(row_n, brno)
+                processed_count += 1
+            except Exception as e:
+                # One dead tab shouldn't kill a 60-bridge run — recover and
+                # move on; only abort if the browser itself is gone.
+                self._log(
+                    f"⚠ Br.No {brno}: {type(e).__name__} mid-row — attempting recovery…",
+                    "warn",
+                )
+                if not self._recover_windows():
+                    raise
+
+        if self._second_check:
+            self._log(
+                f"✅ Second Check complete — processed {processed_count} missing drawing(s), "
+                f"skipped {skipped_count} already-submitted.", "ok"
+            )
+        else:
+            self._log("⏹ Status Updation stopped." if self._stop_evt.is_set()
+                       else "✅ Status Updation complete.", "info")
+        self.stopped.emit("user_stop" if self._stop_evt.is_set() else "done")
+
 
 class ScrutinyPanel(QWidget):
     def __init__(self):
         super().__init__()
-        lay = QVBoxLayout(self)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        cont = QWidget()
+        lay  = QVBoxLayout(cont)
         lay.setContentsMargins(32,28,32,32)
         lay.setSpacing(0)
+        scroll.setWidget(cont)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
 
         hdr = QLabel("Scrutiny"); hdr.setObjectName("panelTitle")
         lay.addWidget(hdr)
@@ -1739,7 +3613,569 @@ class ScrutinyPanel(QWidget):
         ref_lay.addWidget(ref_view)
 
         lay.addWidget(ref_card)
+        lay.addSpacing(16)
+
+        # ── Gradient Checker card ───────────────────────────────────────────
+        grad_card = QFrame(); grad_card.setObjectName("card")
+        grad_card.setStyleSheet(
+            f"QFrame#card{{background:{COLORS['card_bg']};"
+            f"border:1px solid {COLORS['border']};border-radius:10px;}}")
+        gl = QVBoxLayout(grad_card)
+        gl.setContentsMargins(24, 20, 24, 20); gl.setSpacing(14)
+
+        g_title_row = QHBoxLayout()
+        g_icon = QLabel("📈"); g_icon.setFont(QFont("Segoe UI", 18))
+        g_title_row.addWidget(g_icon)
+        g_title_col = QVBoxLayout(); g_title_col.setSpacing(0)
+        g_t1 = QLabel("Gradient Checker  (EXG vs PRO)")
+        g_t1.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        g_t1.setStyleSheet(f"color:{COLORS['text_primary']};")
+        g_t2 = QLabel("Drop a GAD/Site-Plan PDF — chainage, RL and gradient labels are "
+                       "auto-recognised and gradients computed for EXG (black) & PRO (red)")
+        g_t2.setFont(QFont("Segoe UI", 9)); g_t2.setWordWrap(True)
+        g_t2.setStyleSheet(f"color:{COLORS['text_muted']};")
+        g_title_col.addWidget(g_t1); g_title_col.addWidget(g_t2)
+        g_title_row.addLayout(g_title_col); g_title_row.addStretch()
+        gl.addLayout(g_title_row)
+
+        self._grad_zone = DropZone("GAD / Site Plan PDF", compact=True)
+        self._grad_zone.file_dropped.connect(lambda p: setattr(self, "_grad_path", p))
+        gl.addWidget(self._grad_zone)
+
+        g_run_btn = QPushButton("▶  Check Gradients")
+        g_run_btn.setFixedHeight(36)
+        g_run_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        g_run_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        g_run_btn.setStyleSheet(
+            f"QPushButton{{background:{ACCENT};color:#06241C;"
+            f"border:none;border-radius:6px;}}"
+            f"QPushButton:hover{{background:{COLORS.get('accent_hover', ACCENT)};}}")
+        g_run_btn.clicked.connect(self._on_gradient_check)
+        gl.addWidget(g_run_btn)
+
+        self._grad_error_lbl = QLabel("")
+        self._grad_error_lbl.setStyleSheet("color:#F85149;font-size:11px;")
+        self._grad_error_lbl.setVisible(False)
+        gl.addWidget(self._grad_error_lbl)
+
+        self._grad_result_view = QTextEdit()
+        self._grad_result_view.setReadOnly(True)
+        self._grad_result_view.setVisible(False)
+        self._grad_result_view.setMinimumHeight(280)
+        self._grad_result_view.setStyleSheet(
+            f"QTextEdit{{background:{COLORS['input_bg']};"
+            f"border:1px solid {COLORS['border']};border-radius:8px;}}")
+        gl.addWidget(self._grad_result_view)
+
+        lay.addWidget(grad_card)
+        self._grad_path = ""
+        lay.addSpacing(16)
+
+        # ── Corner-Block RL Check card ──────────────────────────────────────
+        cb_card = QFrame(); cb_card.setObjectName("card")
+        cb_card.setStyleSheet(
+            f"QFrame#card{{background:{COLORS['card_bg']};"
+            f"border:1px solid {COLORS['border']};border-radius:10px;}}")
+        cbl = QVBoxLayout(cb_card)
+        cbl.setContentsMargins(24, 20, 24, 20); cbl.setSpacing(14)
+
+        cb_title_row = QHBoxLayout()
+        cb_icon = QLabel("📐"); cb_icon.setFont(QFont("Segoe UI", 18))
+        cb_title_row.addWidget(cb_icon)
+        cb_title_col = QVBoxLayout(); cb_title_col.setSpacing(0)
+        cb_t1 = QLabel("Corner-Block RL Check  (¢ OF BRIDGE title-block)")
+        cb_t1.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        cb_t1.setStyleSheet(f"color:{COLORS['text_primary']};")
+        cb_t2 = QLabel("Finds the CH:/RL: points either side of the bridge centre chainage "
+                        "and, using ONE shared near-bridge gradient per colour, projects "
+                        "each side's RL onto the bridge — flags LEFT vs RIGHT mismatches "
+                        "for EXG (black) & PRO (red)")
+        cb_t2.setFont(QFont("Segoe UI", 9)); cb_t2.setWordWrap(True)
+        cb_t2.setStyleSheet(f"color:{COLORS['text_muted']};")
+        cb_title_col.addWidget(cb_t1); cb_title_col.addWidget(cb_t2)
+        cb_title_row.addLayout(cb_title_col); cb_title_row.addStretch()
+        cbl.addLayout(cb_title_row)
+
+        self._cb_zone = DropZone(
+            "GAD / Site Plan — PDF or Image", compact=True,
+            accept_exts=[".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"])
+        self._cb_zone.file_dropped.connect(lambda p: setattr(self, "_cb_path", p))
+        cbl.addWidget(self._cb_zone)
+
+        cb_run_btn = QPushButton("▶  Check Corner-Block RLs")
+        cb_run_btn.setFixedHeight(36)
+        cb_run_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cb_run_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        cb_run_btn.setStyleSheet(
+            f"QPushButton{{background:{ACCENT};color:#06241C;"
+            f"border:none;border-radius:6px;}}"
+            f"QPushButton:hover{{background:{COLORS.get('accent_hover', ACCENT)};}}")
+        cb_run_btn.clicked.connect(self._on_corner_block_check)
+        cbl.addWidget(cb_run_btn)
+
+        self._cb_error_lbl = QLabel("")
+        self._cb_error_lbl.setStyleSheet("color:#F85149;font-size:11px;")
+        self._cb_error_lbl.setVisible(False)
+        cbl.addWidget(self._cb_error_lbl)
+
+        self._cb_result_view = QTextEdit()
+        self._cb_result_view.setReadOnly(True)
+        self._cb_result_view.setVisible(False)
+        self._cb_result_view.setMinimumHeight(240)
+        self._cb_result_view.setStyleSheet(
+            f"QTextEdit{{background:{COLORS['input_bg']};"
+            f"border:1px solid {COLORS['border']};border-radius:8px;}}")
+        cbl.addWidget(self._cb_result_view)
+
+        # ── Manual-entry fallback (shown only when auto-detection is
+        #    incomplete) — pre-filled with whatever WAS auto-detected,
+        #    blank for whatever wasn't, so the user only has to type the
+        #    missing figures off the drawing. The near-bridge gradient is
+        #    ONE shared value per colour (same ratio + Rise/Fall on both
+        #    sides — see backend note), not one per side.
+        self._cb_manual_frame = QFrame()
+        self._cb_manual_frame.setVisible(False)
+        self._cb_manual_frame.setStyleSheet(
+            f"QFrame{{background:{COLORS['input_bg']};border:1px solid {COLORS['border']};"
+            f"border-radius:8px;}}")
+        mfl = QVBoxLayout(self._cb_manual_frame)
+        mfl.setContentsMargins(16, 14, 16, 14); mfl.setSpacing(8)
+
+        mf_title = QLabel("✏  Couldn't auto-trace everything — fill in the rest")
+        mf_title.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        mf_title.setStyleSheet(f"color:{COLORS['text_primary']};")
+        mfl.addWidget(mf_title)
+
+        self._cb_edits: dict[str, QLineEdit] = {}
+
+        def add_row(parent_lay, label_text, key, width=110, placeholder=""):
+            row = QHBoxLayout()
+            lbl = QLabel(label_text); lbl.setFixedWidth(170)
+            lbl.setFont(QFont("Segoe UI", 9))
+            lbl.setStyleSheet(f"color:{COLORS['text_muted']};")
+            row.addWidget(lbl)
+            ed = QLineEdit(); ed.setFixedWidth(width)
+            ed.setPlaceholderText(placeholder)
+            ed.setFont(QFont("Segoe UI", 9))
+            row.addWidget(ed)
+            row.addStretch()
+            parent_lay.addLayout(row)
+            self._cb_edits[key] = ed
+
+        add_row(mfl, "Bridge No.", "bridge_no", 140, "e.g. 471")
+        add_row(mfl, "Target CH (bridge centre)", "ch_target", 140, "e.g. 262606.020")
+
+        for cat, cat_label in (("EXG", "EXG. (black)"), ("PRO", "PRO. (red)")):
+            sub = QLabel(cat_label)
+            sub.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+            sub.setStyleSheet(f"color:{COLORS['text_primary']};margin-top:6px;")
+            mfl.addWidget(sub)
+
+            for side, side_label in (("LEFT", "  LEFT  —  CH / RL"),
+                                       ("RIGHT", "  RIGHT —  CH / RL")):
+                row = QHBoxLayout(); row.setSpacing(6)
+                lbl = QLabel(side_label); lbl.setFixedWidth(120)
+                lbl.setFont(QFont("Segoe UI", 9))
+                lbl.setStyleSheet(f"color:{COLORS['text_muted']};")
+                row.addWidget(lbl)
+                for field, ph, w in (("ch_start", "CH e.g. 282460.00", 130),
+                                      ("rl_start", "RL e.g. 351.889", 110)):
+                    ed = QLineEdit(); ed.setPlaceholderText(ph); ed.setFixedWidth(w)
+                    ed.setFont(QFont("Segoe UI", 9))
+                    row.addWidget(ed)
+                    self._cb_edits[f"{cat}_{side}.{field}"] = ed
+                row.addStretch()
+                mfl.addLayout(row)
+
+            grow = QHBoxLayout(); grow.setSpacing(6)
+            glbl = QLabel("  Gradient (shared, both sides)"); glbl.setFixedWidth(200)
+            glbl.setFont(QFont("Segoe UI", 9))
+            glbl.setStyleSheet(f"color:{COLORS['text_muted']};")
+            grow.addWidget(glbl)
+            ed_dir = QLineEdit(); ed_dir.setPlaceholderText("R/F"); ed_dir.setFixedWidth(40)
+            ed_dir.setFont(QFont("Segoe UI", 9))
+            grow.addWidget(ed_dir)
+            ed_ratio = QLineEdit(); ed_ratio.setPlaceholderText("1 in N e.g. 238")
+            ed_ratio.setFixedWidth(110)
+            ed_ratio.setFont(QFont("Segoe UI", 9))
+            grow.addWidget(ed_ratio)
+            grow.addStretch()
+            mfl.addLayout(grow)
+            self._cb_edits[f"{cat}.dir"] = ed_dir
+            self._cb_edits[f"{cat}.ratio"] = ed_ratio
+
+        cb_manual_btn = QPushButton("✓  Compute with these values")
+        cb_manual_btn.setFixedHeight(32)
+        cb_manual_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cb_manual_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        cb_manual_btn.setStyleSheet(
+            f"QPushButton{{background:transparent;color:{ACCENT};"
+            f"border:1px solid {ACCENT};border-radius:6px;margin-top:6px;}}"
+            f"QPushButton:hover{{background:{COLORS['accent_glow']};}}")
+        cb_manual_btn.clicked.connect(self._on_corner_block_manual_compute)
+        mfl.addWidget(cb_manual_btn)
+
+        cbl.addWidget(self._cb_manual_frame)
+
+        lay.addWidget(cb_card)
+        self._cb_path = ""
+        lay.addSpacing(16)
+
+        # ── Loop Interface card ─────────────────────────────────────────────
+        li_card = QFrame(); li_card.setObjectName("card")
+        li_card.setStyleSheet(
+            f"QFrame#card{{background:{COLORS['card_bg']};"
+            f"border:1px solid {COLORS['border']};border-radius:10px;}}")
+        lil = QVBoxLayout(li_card)
+        lil.setContentsMargins(24, 20, 24, 20); lil.setSpacing(14)
+
+        li_title_row = QHBoxLayout()
+        li_icon = QLabel("🔁"); li_icon.setFont(QFont("Segoe UI", 18))
+        li_title_row.addWidget(li_icon)
+        li_title_col = QVBoxLayout(); li_title_col.setSpacing(0)
+        li_t1 = QLabel("Loop Interface  (eDAS auto-login)")
+        li_t1.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        li_t1.setStyleSheet(f"color:{COLORS['text_primary']};")
+        li_t2 = QLabel("Opens eDAS in Edge, logs in, solves the arithmetic captcha, "
+                        "and keeps the session alive with a refresh every "
+                        f"{LI_REFRESH_SEC}s — re-logging in automatically on logout")
+        li_t2.setFont(QFont("Segoe UI", 9)); li_t2.setWordWrap(True)
+        li_t2.setStyleSheet(f"color:{COLORS['text_muted']};")
+        li_title_col.addWidget(li_t1); li_title_col.addWidget(li_t2)
+        li_title_row.addLayout(li_title_col); li_title_row.addStretch()
+        lil.addLayout(li_title_row)
+
+        li_btn_row = QHBoxLayout(); li_btn_row.setSpacing(10)
+        self._li_start_btn = QPushButton("▶  Start LI")
+        self._li_start_btn.setFixedHeight(36)
+        self._li_start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._li_start_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self._li_start_btn.setStyleSheet(
+            f"QPushButton{{background:{ACCENT};color:#06241C;"
+            f"border:none;border-radius:6px;padding:0 18px;}}"
+            f"QPushButton:hover{{background:{COLORS.get('accent_hover', ACCENT)};}}")
+        self._li_start_btn.clicked.connect(self._on_li_start)
+        li_btn_row.addWidget(self._li_start_btn)
+
+        self._li_stop_btn = QPushButton("⏹  Stop LI")
+        self._li_stop_btn.setFixedHeight(36)
+        self._li_stop_btn.setEnabled(False)
+        self._li_stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._li_stop_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self._li_stop_btn.setStyleSheet(
+            f"QPushButton{{background:transparent;color:{COLORS['text_secondary']};"
+            f"border:1px solid {COLORS['border']};border-radius:6px;padding:0 18px;}}"
+            f"QPushButton:hover:enabled{{border:1px solid {COLORS['error']};color:{COLORS['error']};}}"
+            f"QPushButton:disabled{{color:{COLORS['text_muted']};}}")
+        self._li_stop_btn.clicked.connect(self._on_li_stop)
+        li_btn_row.addWidget(self._li_stop_btn)
+        li_btn_row.addStretch()
+        lil.addLayout(li_btn_row)
+
+        self._li_log_view = QTextEdit()
+        self._li_log_view.setReadOnly(True)
+        self._li_log_view.setFixedHeight(140)
+        self._li_log_view.setStyleSheet(
+            f"QTextEdit{{background:{COLORS['input_bg']};"
+            f"border:1px solid {COLORS['border']};border-radius:8px;"
+            f"font-family:Consolas;font-size:10px;}}")
+        lil.addWidget(self._li_log_view)
+
+        lay.addWidget(li_card)
+        self._li_worker = None
+        lay.addSpacing(16)
+
+        # ── Status Updation card ────────────────────────────────────────────
+        su_card = QFrame(); su_card.setObjectName("card")
+        su_card.setStyleSheet(
+            f"QFrame#card{{background:{COLORS['card_bg']};"
+            f"border:1px solid {COLORS['border']};border-radius:10px;}}")
+        sul = QVBoxLayout(su_card)
+        sul.setContentsMargins(24, 20, 24, 20); sul.setSpacing(14)
+
+        su_title_row = QHBoxLayout()
+        su_icon = QLabel("🗂️"); su_icon.setFont(QFont("Segoe UI", 18))
+        su_title_row.addWidget(su_icon)
+        su_title_col = QVBoxLayout(); su_title_col.setSpacing(0)
+        su_t1 = QLabel("Status Updation  (eDAS → Google Sheet)")
+        su_t1.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        su_t1.setStyleSheet(f"color:{COLORS['text_primary']};")
+        su_t2 = QLabel("Walks every Br.No in the sheet, looks it up in All Drawings, "
+                        "and fills in Drawing ID / Work Flow Stage / Design Section / "
+                        "CBE-Office / Remarks")
+        su_t2.setFont(QFont("Segoe UI", 9)); su_t2.setWordWrap(True)
+        su_t2.setStyleSheet(f"color:{COLORS['text_muted']};")
+        su_title_col.addWidget(su_t1); su_title_col.addWidget(su_t2)
+        su_title_row.addLayout(su_title_col); su_title_row.addStretch()
+        sul.addLayout(su_title_row)
+
+        su_btn_row = QHBoxLayout(); su_btn_row.setSpacing(10)
+        self._su_start_btn = QPushButton("▶  Start Status Updation")
+        self._su_start_btn.setFixedHeight(36)
+        self._su_start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._su_start_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self._su_start_btn.setStyleSheet(
+            f"QPushButton{{background:{ACCENT};color:#06241C;"
+            f"border:none;border-radius:6px;padding:0 18px;}}"
+            f"QPushButton:hover{{background:{COLORS.get('accent_hover', ACCENT)};}}")
+        self._su_start_btn.clicked.connect(self._on_su_start)
+        su_btn_row.addWidget(self._su_start_btn)
+
+        self._su_second_check_btn = QPushButton("🔍  Second Check")
+        self._su_second_check_btn.setFixedHeight(36)
+        self._su_second_check_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._su_second_check_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self._su_second_check_btn.setToolTip(
+            "Re-check only missing drawings (no tick in GAD Submitted column) "
+            "with extra search time for slow-loading pages")
+        self._su_second_check_btn.setStyleSheet(
+            f"QPushButton{{background:transparent;color:{COLORS['text_primary']};"
+            f"border:2px solid {ACCENT};border-radius:6px;padding:0 18px;}}"
+            f"QPushButton:hover{{background:{COLORS['accent_glow']};}}")
+        self._su_second_check_btn.clicked.connect(self._on_su_second_check)
+        su_btn_row.addWidget(self._su_second_check_btn)
+
+        self._su_stop_btn = QPushButton("⏹  Stop")
+        self._su_stop_btn.setFixedHeight(36)
+        self._su_stop_btn.setEnabled(False)
+        self._su_stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._su_stop_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self._su_stop_btn.setStyleSheet(
+            f"QPushButton{{background:transparent;color:{COLORS['text_secondary']};"
+            f"border:1px solid {COLORS['border']};border-radius:6px;padding:0 18px;}}"
+            f"QPushButton:hover:enabled{{border:1px solid {COLORS['error']};color:{COLORS['error']};}}"
+            f"QPushButton:disabled{{color:{COLORS['text_muted']};}}")
+        self._su_stop_btn.clicked.connect(self._on_su_stop)
+        su_btn_row.addWidget(self._su_stop_btn)
+
+        self._su_progress_lbl = QLabel("")
+        self._su_progress_lbl.setFont(QFont("Segoe UI", 9))
+        self._su_progress_lbl.setStyleSheet(f"color:{COLORS['text_muted']};")
+        su_btn_row.addWidget(self._su_progress_lbl)
+        su_btn_row.addStretch()
+        sul.addLayout(su_btn_row)
+
+        self._su_log_view = QTextEdit()
+        self._su_log_view.setReadOnly(True)
+        self._su_log_view.setFixedHeight(140)
+        self._su_log_view.setStyleSheet(
+            f"QTextEdit{{background:{COLORS['input_bg']};"
+            f"border:1px solid {COLORS['border']};border-radius:8px;"
+            f"font-family:Consolas;font-size:10px;}}")
+        sul.addWidget(self._su_log_view)
+
+        lay.addWidget(su_card)
+        self._su_worker = None
         lay.addStretch()
+
+    def _cb_prefill_manual(self, result: dict):
+        """Pre-fills the manual-entry fields with whatever the auto-detector
+        DID find, leaving the rest blank for the user to type in."""
+        pages = result.get("pages", [])
+        if not pages:
+            return
+        pr = pages[0]  # single-sheet tool — first page is the relevant one
+        self._cb_edits["bridge_no"].setText(pr.get("bridge_no") or "")
+        self._cb_edits["ch_target"].setText(
+            f'{pr["ch_target"]:.3f}' if pr.get("ch_target") is not None else "")
+        for key in _SIDE_KEYS:
+            b = pr.get("ch_rl", {}).get(key) or {}
+            self._cb_edits[f"{key}.ch_start"].setText(
+                f'{b["ch_start"]:.3f}' if b.get("ch_start") is not None else "")
+            self._cb_edits[f"{key}.rl_start"].setText(
+                f'{b["rl_start"]:.3f}' if b.get("rl_start") is not None else "")
+        for cat in _CAT_KEYS:
+            g = pr.get("gradients", {}).get(cat) or {}
+            self._cb_edits[f"{cat}.dir"].setText(g.get("dir") or "")
+            self._cb_edits[f"{cat}.ratio"].setText(
+                f'{g["ratio"]:.0f}' if g.get("ratio") is not None else "")
+
+    def _cb_gather_manual(self) -> dict | None:
+        """Reads the manual-entry fields into the `manual=` dict shape
+        expected by run_corner_block_check(). Returns None (and sets the
+        error label) if a filled-in number can't be parsed. The gradient
+        (direction + ratio) is read ONCE per colour and shared by both
+        LEFT and RIGHT — see the shared-gradient note in the backend."""
+        def fnum(key):
+            txt = self._cb_edits[key].text().strip().replace(",", "")
+            if not txt:
+                return None
+            return float(txt)
+
+        try:
+            manual = {
+                "bridge_no": self._cb_edits["bridge_no"].text().strip() or None,
+                "ch_target": fnum("ch_target"),
+                "ch_rl": {}, "gradients": {},
+            }
+            for key in _SIDE_KEYS:
+                ch_start = fnum(f"{key}.ch_start")
+                rl_start = fnum(f"{key}.rl_start")
+                if ch_start is not None and rl_start is not None:
+                    manual["ch_rl"][key] = {"ch_start": ch_start, "rl_start": rl_start}
+            for cat in _CAT_KEYS:
+                direction = self._cb_edits[f"{cat}.dir"].text().strip().upper() or None
+                if direction and direction not in ("R", "F"):
+                    self._cb_error_lbl.setText(
+                        f"'{cat}' gradient direction must be R or F, got '{direction}'.")
+                    self._cb_error_lbl.setVisible(True)
+                    return None
+                ratio = fnum(f"{cat}.ratio")
+                if direction and ratio is not None:
+                    manual["gradients"][cat] = {"dir": direction, "ratio": ratio}
+            return manual
+        except ValueError as e:
+            self._cb_error_lbl.setText(f"Enter numbers for CH/RL/ratio fields ({e}).")
+            self._cb_error_lbl.setVisible(True)
+            return None
+
+    def _on_corner_block_check(self):
+        self._cb_error_lbl.setVisible(False)
+        if not self._cb_path:
+            self._cb_zone.setStyleSheet(
+                f"border:2px dashed {COLORS['error']};border-radius:12px;")
+            self._cb_error_lbl.setText("Drop or select a GAD PDF or image first.")
+            self._cb_error_lbl.setVisible(True)
+            return
+        self._cb_zone.setStyleSheet("")
+        try:
+            result = run_corner_block_check(self._cb_path)
+        except Exception as e:
+            import traceback
+            self._cb_error_lbl.setText(f"Could not read corner-block: {e}")
+            self._cb_error_lbl.setVisible(True)
+            self._cb_result_view.setVisible(False)
+            self._cb_manual_frame.setVisible(False)
+            print(traceback.format_exc())
+            return
+
+        result_html = _build_corner_block_html(result)
+        self._cb_result_view.setHtml(result_html)
+        self._cb_result_view.setVisible(True)
+
+        needs_manual = any(not pr["ready"] for pr in result.get("pages", []))
+        if needs_manual:
+            self._cb_prefill_manual(result)
+        self._cb_manual_frame.setVisible(needs_manual)
+
+    def _on_corner_block_manual_compute(self):
+        self._cb_error_lbl.setVisible(False)
+        if not self._cb_path:
+            return
+        manual = self._cb_gather_manual()
+        if manual is None:
+            return
+        try:
+            result = run_corner_block_check(self._cb_path, manual=manual)
+        except Exception as e:
+            import traceback
+            self._cb_error_lbl.setText(f"Could not compute: {e}")
+            self._cb_error_lbl.setVisible(True)
+            print(traceback.format_exc())
+            return
+        result_html = _build_corner_block_html(result)
+        self._cb_result_view.setHtml(result_html)
+        self._cb_result_view.setVisible(True)
+
+    def _on_gradient_check(self):
+        self._grad_error_lbl.setVisible(False)
+        if not self._grad_path:
+            self._grad_zone.setStyleSheet(
+                f"border:2px dashed {COLORS['error']};border-radius:12px;")
+            self._grad_error_lbl.setText("Drop or select a GAD PDF first.")
+            self._grad_error_lbl.setVisible(True)
+            return
+        self._grad_zone.setStyleSheet("")
+        try:
+            result = run_gradient_check(self._grad_path)
+        except Exception as e:
+            import traceback
+            self._grad_error_lbl.setText(f"Could not read gradients: {e}")
+            self._grad_error_lbl.setVisible(True)
+            self._grad_result_view.setVisible(False)
+            print(traceback.format_exc())
+            return
+        html = _build_gradient_html(result)
+        self._grad_result_view.setHtml(html)
+        self._grad_result_view.setVisible(True)
+
+    # ── Loop Interface handlers ─────────────────────────────────────────
+    def _li_append(self, msg: str, level: str = "info"):
+        color = {"ok": "#3FB950", "warn": "#D29922", "err": "#F85149"}.get(level, "#8B949E")
+        self._li_log_view.append(f"<span style='color:{color}'>{msg}</span>")
+
+    def _on_li_start(self):
+        if self._li_worker is not None:
+            return
+        self._li_log_view.clear()
+        self._li_append("Starting Loop Interface…")
+        self._li_worker = LoopInterfaceWorker()
+        self._li_worker.log.connect(self._li_append)
+        self._li_worker.stopped.connect(self._on_li_stopped)
+        self._li_worker.start()
+        self._li_start_btn.setEnabled(False)
+        self._li_stop_btn.setEnabled(True)
+
+    def _on_li_stop(self):
+        if self._li_worker is not None:
+            self._li_worker.stop()
+        self._li_stop_btn.setEnabled(False)
+
+    def _on_li_stopped(self, reason: str):
+        self._li_worker = None
+        self._li_start_btn.setEnabled(True)
+        self._li_stop_btn.setEnabled(False)
+
+    # ── Status Updation handlers ────────────────────────────────────────
+    def _su_append(self, msg: str, level: str = "info"):
+        color = {"ok": "#3FB950", "warn": "#D29922", "err": "#F85149"}.get(level, "#8B949E")
+        self._su_log_view.append(f"<span style='color:{color}'>{msg}</span>")
+
+    def _on_su_start(self):
+        if self._su_worker is not None:
+            return
+        self._su_log_view.clear()
+        self._su_progress_lbl.setText("")
+        self._su_append("Starting Status Updation…")
+        self._su_worker = StatusUpdationWorker(second_check=False)
+        self._su_worker.log.connect(self._su_append)
+        self._su_worker.progress.connect(self._on_su_progress)
+        self._su_worker.stopped.connect(self._on_su_stopped)
+        self._su_worker.start()
+        self._su_start_btn.setEnabled(False)
+        self._su_second_check_btn.setEnabled(False)
+        self._su_stop_btn.setEnabled(True)
+
+    def _on_su_second_check(self):
+        """Re-check only missing drawings (no GAD submitted tick) with extra
+        search time for slow-loading pages."""
+        if self._su_worker is not None:
+            return
+        self._su_log_view.clear()
+        self._su_progress_lbl.setText("")
+        self._su_append("Starting Second Check — only missing drawings…")
+        self._su_worker = StatusUpdationWorker(second_check=True)
+        self._su_worker.log.connect(self._su_append)
+        self._su_worker.progress.connect(self._on_su_progress)
+        self._su_worker.stopped.connect(self._on_su_stopped)
+        self._su_worker.start()
+        self._su_start_btn.setEnabled(False)
+        self._su_second_check_btn.setEnabled(False)
+        self._su_stop_btn.setEnabled(True)
+
+    def _on_su_stop(self):
+        if self._su_worker is not None:
+            self._su_worker.stop()
+        self._su_stop_btn.setEnabled(False)
+
+    def _on_su_progress(self, current: int, last: int):
+        self._su_progress_lbl.setText(f"Row {current} / {last}")
+
+    def _on_su_stopped(self, reason: str):
+        self._su_worker = None
+        self._su_start_btn.setEnabled(True)
+        self._su_second_check_btn.setEnabled(True)
+        self._su_stop_btn.setEnabled(False)
 
     def _on_calc(self):
         self._error_lbl.setVisible(False)
@@ -1780,8 +4216,10 @@ class GADPanel(QWidget):
         ml.setContentsMargins(0,0,0,0); ml.setSpacing(0)
 
         top = QWidget(); top.setObjectName("gadTopBar")
+        _a, _b = THEME_SWATCHES[current_theme()]
         top.setStyleSheet(
-            f"QWidget#gadTopBar{{background:{COLORS['navy']};"
+            f"QWidget#gadTopBar{{"
+            f"background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 {_a},stop:1 {_b});"
             f"border-bottom:1px solid {COLORS['navy_border']};}}")
         tl = QVBoxLayout(top)
         tl.setContentsMargins(32,16,32,0); tl.setSpacing(0)
@@ -1789,14 +4227,14 @@ class GADPanel(QWidget):
         tr = QHBoxLayout()
         pt = QLabel("GAD Checking")
         pt.setFont(QFont("Segoe UI",16,QFont.Weight.Bold))
-        pt.setStyleSheet(f"color:{COLORS['text_sidebar']};")
+        pt.setStyleSheet("color:#FFFFFF;")
         tr.addWidget(pt); tr.addStretch()
         badge = QLabel("Semantic Engine")
         badge.setObjectName("tagInfo"); tr.addWidget(badge)
         tl.addLayout(tr); tl.addSpacing(2)
 
         ps = QLabel("Annotation extraction → Zone classification → Semantic value comparison → AI assist")
-        ps.setStyleSheet(f"color:{COLORS['text_muted']};font-size:10px;")
+        ps.setStyleSheet("color:rgba(255,255,255,0.85);font-size:10px;")
         tl.addWidget(ps); tl.addSpacing(12)
 
         br = QHBoxLayout(); br.setSpacing(0)
@@ -1827,14 +4265,13 @@ class GADPanel(QWidget):
     @staticmethod
     def _ts(active):
         if active:
-            return (f"QPushButton{{background:transparent;color:{ACCENT};"
-                    f"border:none;border-bottom:3px solid {ACCENT};"
-                    f"border-radius:0;padding:7px 16px;}}")
-        return (f"QPushButton{{background:transparent;color:{COLORS['text_muted']};"
-                f"border:none;border-bottom:3px solid transparent;"
-                f"border-radius:0;padding:7px 16px;}}"
-                f"QPushButton:hover{{color:{COLORS['text_sidebar']};"
-                f"background:{COLORS['navy_light']};}}")
+            return ("QPushButton{background:rgba(255,255,255,0.18);color:#FFFFFF;"
+                    "border:none;border-bottom:3px solid #FFFFFF;"
+                    "border-radius:6px 6px 0 0;padding:7px 16px;}")
+        return ("QPushButton{background:transparent;color:rgba(255,255,255,0.75);"
+                "border:none;border-bottom:3px solid transparent;"
+                "border-radius:6px 6px 0 0;padding:7px 16px;}"
+                "QPushButton:hover{color:#FFFFFF;background:rgba(255,255,255,0.10);}")
 
     def _sw(self, idx):
         self._stack.setCurrentIndex(idx)

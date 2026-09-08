@@ -14,15 +14,19 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QLineEdit, QComboBox, QGridLayout,
     QMessageBox, QFileDialog, QSizePolicy, QStackedWidget, QButtonGroup,
-    QSplitter
+    QSplitter, QCheckBox
 )
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QDoubleValidator
 
-from gui.styles import COLORS
+from gui.styles import COLORS, shade
+from gui.icons import icon, styled_button
+from gui.report_palette import TEAL, LGREY, MGREY, GREEN, DARK_TEXT, MUTE_TEXT, ROW_TINT, OK_BG, FAIL_BG
 from gui.fig31_lookup import get_tc_ratio, get_1hr_ratio, get_scaling_k
 from gui.smart_extract import SmartExtractWidget
 from gui.scour_panel   import ScourPanel
+from gui.animated_extract_button import AnimatedProgressButton
+from gui.data_manager import get_data_manager
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -51,10 +55,10 @@ SOIL_COEFF = {
 
 SUB_ZONES = ["3E", "1", "2", "3A", "3B", "3C", "3D", "4", "5", "6", "7"]
 
-STRUCTURE_TYPES = ["RCC BOX", "ARCH", "SLAB CULVERT", "PIPE CULVERT", "BRIDGE"]
+STRUCTURE_TYPES = ["RCC BOX", "ARCH", "SLAB CULVERT", "PIPE CULVERT", "PSC SLAB", "PSC GIRDER", "BRIDGE"]
 
 SPAN_TYPES = ["RCC Box", "Arch Bridge", "RCC Slab", "PSC Slab", "PSC Girder",
-              "Steel Girder", "Plate Girder", "Pipe Culvert", "Open Web Girder"]
+              "Steel Girder", "Plate Girder", "Pipe Culvert", "Open Web Girder", "STC"]
 
 PROPOSED_BY = ["CAO/C/SC", "CAO/C/BZA", "CAO/C/HYB", "CAO/C/GTL",
                "CAO/C/GNT", "CAO/C/NED", "RVNL/BZA", "RVNL/SC", "RVNL/HYB"]
@@ -161,17 +165,48 @@ def compute_newline(inp: dict) -> dict:
     net_freeboard = FL - CHFL
     freeboard_ok  = net_freeboard >= 1.000
 
-    # Provided Area (opening width x opening height) — only meaningful for
-    # box-type openings where a clear height is specified.
+    # Provided Area & vertical clearances.
     structure_type = inp.get("structure_type", "RCC BOX")
+    is_box = "box" in structure_type.lower()
     height_str = str(inp.get("opening_height", "")).strip()
     height = float(height_str) if height_str else None
-    if "box" in structure_type.lower() and height:
-        provided_area = width * height
+
+    # Standard Vertical Clearance (SS Code 4.8.1) — Nil for RCC Box only;
+    # computed against Q50 for every other structure type.
+    std_vc = _std_vc(Q50, structure_type)
+
+    # Earth Cushion — entry is available only for RCC BOX / ARCH (form field
+    # hidden for the rest); every other structure type is forced to 0.
+    cushion_str = str(inp.get("earth_cushion", "")).strip()
+    earth_cushion = (float(cushion_str)
+                     if cushion_str and structure_type.upper() in ("RCC BOX", "ARCH")
+                     else 0.0)
+
+    # BOS = Formation Level − Slab Thickness − Earth Cushion
+    bos = FL - slab_thk - earth_cushion
+
+    # Pro. Clear Span (proposed structure) — drives the Provided Area audit
+    # for every structure type other than RCC BOX.
+    clear_span_str = str(inp.get("pro_clear_span", "")).strip()
+    clear_span = float(clear_span_str) if clear_span_str else None
+
+    # Provided Area of Waterway:
+    #   RCC BOX  — existing basis kept: Opening Width × Opening Height
+    #   others   — (BOS − Std VC − BL) × Pro. Clear Span
+    #              (used in the calculation only — formula not printed)
+    if is_box:
+        if height:
+            provided_area = width * height
+            area_adequate = provided_area >= net_area_req
+        else:
+            provided_area = None
+            area_adequate = None
+    elif clear_span and clear_span > 0 and (bos - std_vc - BL) > 0:
+        provided_area = (bos - std_vc - BL) * clear_span
         area_adequate = provided_area >= net_area_req
     else:
         provided_area = None
-        area_adequate = None
+        area_adequate = False
 
     return {
         "mode": "newline",
@@ -182,6 +217,7 @@ def compute_newline(inp: dict) -> dict:
         "bed_level": BL, "h_diff": H_diff, "soil_type": soil, "sub_zone": sub_zone,
         "ohfl": OHFL, "r50": R50, "formation_level": FL, "slab_thickness": slab_thk,
         "velocity": vel, "width": width, "structure_type": structure_type,
+        "earth_cushion": earth_cushion, "bos": bos, "clear_span": clear_span,
         "opening_height": height, "provided_area": provided_area, "area_adequate": area_adequate,
         "slope": slope_percent, "gradient": gradient, "tc_hrs": tc_hrs, "tc_min": tc_min,
         "tc_formula": tc_formula, "F": F, "C": C,
@@ -192,6 +228,7 @@ def compute_newline(inp: dict) -> dict:
         "net_area_req": net_area_req, "depth_req": depth_req, "CHFL": CHFL,
         "min_FL_req": min_FL_req, "base_clr": base_clr, "governing_FL": governing_FL,
         "net_freeboard": net_freeboard, "freeboard_ok": freeboard_ok,
+        "std_vc": std_vc,
     }
 
 
@@ -200,13 +237,35 @@ def compute_newline(inp: dict) -> dict:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _std_vc(Q: float, span_type: str) -> float:
-    """Standard Vertical Clearance per SS Code 4.8.1."""
-    if "box" in span_type.lower() or "pipe" in span_type.lower() or "slab" in span_type.lower():
-        return 0.0   # Nil for closed sections
-    if Q < 0.3:   return 0.15
-    if Q < 3.0:   return 0.60
-    if Q < 30.0:  return 0.90
-    return 1.20
+    """
+    Standard Vertical Clearance per SS Code 4.8.1:
+        Discharge (cumecs)     Vertical Clearance (mm)
+        0-30                   600
+        31-300                 600-1200 (pro-rata, linear)
+        301-3000               1500
+        Above 3000             1800
+
+    Nil for RCC Box only (per office practice — VC is computed for every
+    other span type: Arch, Slab, Girder, Pipe Culvert, etc.).
+
+    Tries gui.gad_panel.compute_vc_mm() first (shared with the GAD Review
+    System's cross-check) but never lets an import failure or lookup error
+    take the app down — falls back to the table above computed inline.
+    """
+    if "box" in span_type.lower():
+        return 0.0   # Nil — RCC Box only
+    try:
+        from gui.gad_panel import compute_vc_mm
+        vc_mm, _note = compute_vc_mm(Q)
+        if vc_mm is not None:
+            return vc_mm / 1000.0
+    except Exception:
+        pass
+    if Q <= 30:      vc_mm = 600.0
+    elif Q <= 300:   vc_mm = 600.0 + (Q - 30) * (1200.0 - 600.0) / (300.0 - 30.0)
+    elif Q <= 3000:  vc_mm = 1500.0
+    else:            vc_mm = 1800.0
+    return vc_mm / 1000.0
 
 
 def compute_doubling(inp: dict) -> dict:
@@ -227,7 +286,16 @@ def compute_doubling(inp: dict) -> dict:
         n_spans_prop = int(float(inp.get("n_spans_prop", "1") or "1"))
 
         span_type_prop = inp.get("span_type_prop", "RCC Box")
+        span_type_exg  = inp.get("span_type_exg", "Arch Bridge")
         velocity = 2.44   # Standard assumed velocity
+
+        # Proposed structure's clear opening height (only meaningful/visible
+        # for box-type structures — see _toggle_clear_height). Used to cap
+        # the proposed area of waterway by the physical opening, not just
+        # the freeboard-derived depth (correction: was collected from the
+        # form but never actually used in this calculation before).
+        ch_prop_str = inp.get("ch_prop", "").strip()
+        ch_prop = float(ch_prop_str) if ch_prop_str else 0.0
 
         # U/S bridge CHFL (if applicable)
         us_ohfl_str = inp.get("us_ohfl", "").strip()
@@ -235,6 +303,10 @@ def compute_doubling(inp: dict) -> dict:
 
     except (ValueError, KeyError) as e:
         return {"error": f"Invalid input: {e}"}
+
+    if OHFL == 0 or BL == 0:
+        return {"error": "O.H.F.L. and Bed Level must be entered (real RL values are "
+                          "never 0 — check these two fields, autofill may have missed them)."}
 
     # ── Calculations ──────────────────────────────────────────────────────
     # 1. Existing lineal waterway
@@ -246,14 +318,22 @@ def compute_doubling(inp: dict) -> dict:
     # 3. OHFL discharge
     Q = exg_area * velocity
 
-    # 4. Standard VC for Q
-    std_vc = _std_vc(Q, span_type_prop)
+    # 4. Standard VC for Q — evaluated against the EXISTING structure's own
+    #    type, since this row sits under "EXISTING BRIDGE" in the report.
+    #    (Correction: this previously used span_type_prop, so an existing
+    #    Arch/Slab/Bridge span incorrectly showed "--Nil--" whenever the
+    #    *proposed* structure happened to be RCC Box.)
+    std_vc = _std_vc(Q, span_type_exg)
+
+    # 4b. Standard VC required for the PROPOSED structure — genuinely
+    #     depends on the proposed type, used only by row 6 below.
+    std_vc_prop = _std_vc(Q, span_type_prop)
 
     # 5. Existing VC
     exg_vc = BOS_exg - OHFL
 
     # 6. Required VC for proposed bridge
-    req_vc = std_vc   # (0.0 for RCC Box)
+    req_vc = std_vc_prop   # (0.0 for RCC Box)
 
     # 7. Existing freeboard
     exg_fb = FL_exg - OHFL
@@ -277,15 +357,37 @@ def compute_doubling(inp: dict) -> dict:
 
     # 12. Proposed VC
     prop_vc_val = BOS_prop - adopted_CHFL
-    prop_vc_nil = "box" in span_type_prop.lower() or "pipe" in span_type_prop.lower()
+    prop_vc_nil = "box" in span_type_prop.lower()
     prop_vc_str = "--Nil-- (RCC Box)" if prop_vc_nil else f"{prop_vc_val:.3f} m"
 
     # 13. Proposed FB
     prop_fb = FL_prop - adopted_CHFL
     fb_ok = prop_fb >= STD_FB
 
-    # 14. Proposed area with Std.FB
-    prop_area_fb = prop_lw * (FL_prop - BL - STD_FB)
+    # 14. Proposed area with Std.FB — governed differently by structure type:
+    #     Non-box (Arch/Girder/Slab/Pipe Culvert/etc.) — VC-governed:
+    #         Area = (BOS_prop - Min. VC Required - BL) x Proposed Lineal Waterway
+    #         Min. VC Required = std_vc_prop, from the same SS Code 4.8.1 table
+    #         as gad_panel.compute_vc_mm().
+    #     RCC Box (no VC requirement) — freeboard-governed, capped by the
+    #         structure's own clear opening height when known (unchanged).
+    if "box" in span_type_prop.lower():
+        fb_depth = FL_prop - BL - STD_FB
+        area_option_fb = prop_lw * fb_depth
+        if ch_prop > 0:
+            area_option_ch = prop_lw * ch_prop
+            prop_area_fb = min(area_option_fb, area_option_ch)
+            area_governed_by = "Clear Height" if area_option_ch < area_option_fb else "Freeboard depth"
+        else:
+            area_option_ch = None
+            prop_area_fb = area_option_fb
+            area_governed_by = "Freeboard depth"
+    else:
+        vc_depth = BOS_prop - std_vc_prop - BL
+        area_option_fb = prop_lw * vc_depth
+        area_option_ch = None
+        prop_area_fb = area_option_fb
+        area_governed_by = "Min. VC (BOS - VC - BL)"
     area_ok = prop_area_fb > req_area
 
     adequate = fb_ok and area_ok
@@ -320,6 +422,7 @@ def compute_doubling(inp: dict) -> dict:
         "exg_area":        exg_area,
         "Q":               Q,
         "std_vc":          std_vc,
+        "std_vc_prop":     std_vc_prop,
         "exg_vc":          exg_vc,
         "req_vc":          req_vc,
         "exg_fb":          exg_fb,
@@ -335,6 +438,10 @@ def compute_doubling(inp: dict) -> dict:
         "prop_vc_val":     prop_vc_val,
         "prop_fb":         prop_fb,
         "fb_ok":           fb_ok,
+        "ch_prop":         ch_prop,
+        "area_option_fb":  area_option_fb,
+        "area_option_ch":  area_option_ch,
+        "area_governed_by": area_governed_by,
         "prop_area_fb":    prop_area_fb,
         "area_ok":         area_ok,
         "adequate":        adequate,
@@ -348,14 +455,11 @@ def compute_doubling(inp: dict) -> dict:
 
 def _pdf_styles():
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib import colors as rc
     from reportlab.lib.enums import TA_CENTER, TA_LEFT
     BASE = getSampleStyleSheet()
     def S(name, **kw): return ParagraphStyle(name, parent=BASE["Normal"], **kw)
-    teal  = rc.HexColor("#006666")
-    lgrey = rc.HexColor("#f5f5f5")
-    mgrey = rc.HexColor("#dddddd")
-    green = rc.HexColor("#006400")
+    teal, lgrey, mgrey, green = TEAL, LGREY, MGREY, GREEN
+    from reportlab.lib import colors as rc
     return S, teal, lgrey, mgrey, green, rc, TA_CENTER, TA_LEFT
 
 
@@ -377,6 +481,24 @@ def _pdf_header(story, res, teal, hdr_style, W, M, subtitle="As per RDSO's Repor
     story.append(Spacer(1, 5))
 
 
+def _append_attachment_page(calc_pdf_path: str, attachment_path: str, out_path: str):
+    """
+    Append a PDF or image as the final page of the generated calculation
+    PDF, writing the combined result to out_path.
+
+    PyMuPDF opens image files (PNG/JPG/BMP/TIFF) directly as a single-page
+    "document" the same way it opens a PDF, so one code path handles both
+    attachment types — no separate image-to-PDF conversion step needed.
+    """
+    import fitz  # PyMuPDF
+    calc = fitz.open(calc_pdf_path)
+    attachment = fitz.open(attachment_path)
+    calc.insert_pdf(attachment)
+    attachment.close()
+    calc.save(out_path)
+    calc.close()
+
+
 def generate_pdf_newline(res: dict, path: str):
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
@@ -388,11 +510,11 @@ def generate_pdf_newline(res: dict, path: str):
 
     hdr_s  = S("h", fontSize=8, textColor=rc.white, fontName="Helvetica-Bold", alignment=TA_CENTER)
     ttl_s  = S("t", fontSize=13, textColor=teal, fontName="Helvetica-Bold", alignment=TA_CENTER)
-    sub_s  = S("s", fontSize=8, textColor=rc.HexColor("#444"), alignment=TA_CENTER)
+    sub_s  = S("s", fontSize=8, textColor=DARK_TEXT, alignment=TA_CENTER)
     sec_s  = S("sc", fontSize=9, fontName="Helvetica-Bold", textColor=rc.white)
     lbl_s  = S("l", fontSize=8.5)
     val_s  = S("v", fontSize=8.5, fontName="Helvetica-Bold")
-    note_s = S("n", fontSize=7.5, textColor=rc.HexColor("#555"), alignment=TA_CENTER)
+    note_s = S("n", fontSize=7.5, textColor=MUTE_TEXT, alignment=TA_CENTER)
 
     def sec_hdr(letter, text):
         t = Table([[Paragraph(f" {letter}  {text}", sec_s)]], colWidths=[W-2*M])
@@ -471,7 +593,7 @@ def generate_pdf_newline(res: dict, path: str):
         ("TEXTCOLOR",(0,0),(-1,0),rc.white),
         ("TOPPADDING",(0,0),(-1,-1),2.5),("BOTTOMPADDING",(0,0),(-1,-1),2.5),
         ("LEFTPADDING",(0,0),(-1,-1),5),
-        ("BACKGROUND",(0,idx+1),(-1,idx+1),rc.HexColor("#e0f5ef")),
+        ("BACKGROUND",(0,idx+1),(-1,idx+1),ROW_TINT),
     ]))
     story.append(c_tbl)
     story.append(Spacer(1,5))
@@ -520,6 +642,23 @@ def generate_pdf_newline(res: dict, path: str):
     # F: Adequacy
     story.append(sec_hdr("F","WATERWAY ADEQUACY & FREEBOARD VERIFICATION AUDIT"))
     fb_str = "ADEQUATE" if res['freeboard_ok'] else "INADEQUATE — REVIEW REQUIRED"
+    # Provided Area — RCC BOX keeps the existing Opening W×H basis; every other
+    # structure type uses (BOS − Std VC − BL) × Pro. Clear Span. The formula is
+    # used for the calculation only and is intentionally not printed on the sheet.
+    is_box_type = "box" in res['structure_type'].lower()
+    if res.get('provided_area') is not None:
+        if is_box_type:
+            prov_txt = (f"{res['width']:.2f} × {res['opening_height']:.2f} = "
+                        f"{res['provided_area']:.3f} m²  "
+                        f"[{'ADEQUATE' if res['area_adequate'] else 'INADEQUATE'}]")
+        else:
+            prov_txt = (f"{res['provided_area']:.3f} m²  "
+                        f"[{'ADEQUATE' if res['area_adequate'] else 'INADEQUATE'}]")
+    elif not is_box_type:
+        prov_txt = ("N/A — Pro. Clear Span not specified" if not res.get('clear_span')
+                    else "N/A — available depth (BOS − VC − BL) not positive")
+    else:
+        prov_txt = "N/A (opening height not specified)"
     story.append(dtbl([
         [Paragraph("a",lbl_s),Paragraph("Design Volume Discharge (Q)",lbl_s),Paragraph(f"{res['Q50']:.2f} m³/sec",val_s)],
         [Paragraph("b",lbl_s),Paragraph("Design Velocity (V) — Gradient 1 in "
@@ -542,12 +681,14 @@ def generate_pdf_newline(res: dict, path: str):
         [Paragraph("m",lbl_s),Paragraph("Net Freeboard Available",lbl_s),
          Paragraph(f"{res['net_freeboard']:.3f} m  [{fb_str}]",val_s)],
         [Paragraph("n",lbl_s),Paragraph("Design Adopted Formation Level",lbl_s),Paragraph(f"{res['formation_level']:.3f} m",val_s)],
-        [Paragraph("o",lbl_s),Paragraph("Provided Area (Opening Width × Opening Height)",lbl_s),
-         Paragraph(
-             (f"{res['width']:.2f} × {res['opening_height']:.2f} = {res['provided_area']:.3f} m²  "
-              f"[{'ADEQUATE' if res['area_adequate'] else 'INADEQUATE'}]")
-             if res.get('provided_area') is not None else "N/A (opening height not specified)",
-             val_s)],
+        [Paragraph("o",lbl_s),Paragraph("Bottom of Slab (BOS)",lbl_s),
+         Paragraph(f"{res['bos']:.3f} m",val_s)],
+        [Paragraph("p",lbl_s),Paragraph("Pro. Clear Span",lbl_s),
+         Paragraph(f"{res['clear_span']:.3f} m" if res.get('clear_span') else "—", val_s)],
+        [Paragraph("q",lbl_s),Paragraph("Provided Area (Available Waterway)",lbl_s),
+         Paragraph(prov_txt, val_s)],
+        [Paragraph("r",lbl_s),Paragraph("Standard Vertical Clearance (SS Code 4.8.1)",lbl_s),
+         Paragraph(f"{res['std_vc']:.3f} m" if res['std_vc'] > 0 else "--Nil-- (RCC Box)", val_s)],
     ], col_w=[8*mm,105*mm,W-2*M-113*mm]))
     story.append(Spacer(1,5))
 
@@ -558,13 +699,13 @@ def generate_pdf_newline(res: dict, path: str):
     v_tbl = Table([[Paragraph(vtext, S("vd",fontSize=9,fontName="Helvetica-Bold",textColor=vcolor,alignment=TA_CENTER))]],
                   colWidths=[W-2*M])
     v_tbl.setStyle(TableStyle([("BOX",(0,0),(-1,-1),1.2,vcolor),
-                               ("BACKGROUND",(0,0),(-1,-1),rc.HexColor("#f0fff8") if res['freeboard_ok'] else rc.HexColor("#fff0f0")),
+                               ("BACKGROUND",(0,0),(-1,-1),OK_BG if res['freeboard_ok'] else FAIL_BG),
                                ("TOPPADDING",(0,0),(-1,-1),6),("BOTTOMPADDING",(0,0),(-1,-1),6)]))
     story.append(v_tbl)
     story.append(Spacer(1,4))
     story.append(Paragraph("Design discharge accommodated with standard freeboard margins as per RDSO RBF-16 norms.", note_s))
     story.append(Spacer(1,6))
-    story.append(Paragraph(f"Prepared by: Bridge Engineering Dept. | South Central Railway | Section: {res['section']}", note_s))
+    story.append(Paragraph(f"Prepared For: Bridge Engineering Dept. | South Central Railway | Section: {res['section']}", note_s))
     doc.build(story)
 
 
@@ -579,11 +720,11 @@ def generate_pdf_doubling(res: dict, path: str):
 
     hdr_s  = S("h",fontSize=8,textColor=rc.white,fontName="Helvetica-Bold",alignment=TA_CENTER)
     ttl_s  = S("t",fontSize=13,textColor=teal,fontName="Helvetica-Bold",alignment=TA_CENTER)
-    sub_s  = S("s",fontSize=8,textColor=rc.HexColor("#444"),alignment=TA_CENTER)
+    sub_s  = S("s",fontSize=8,textColor=DARK_TEXT,alignment=TA_CENTER)
     sec_s  = S("sc",fontSize=9,fontName="Helvetica-Bold",textColor=rc.white)
     lbl_s  = S("l",fontSize=8.5)
     val_s  = S("v",fontSize=8.5,fontName="Helvetica-Bold")
-    note_s = S("n",fontSize=7.5,textColor=rc.HexColor("#555"),alignment=TA_CENTER)
+    note_s = S("n",fontSize=7.5,textColor=MUTE_TEXT,alignment=TA_CENTER)
 
     def sec_hdr(letter, text):
         t = Table([[Paragraph(f" {letter}  {text}", sec_s)]], colWidths=[W-2*M])
@@ -668,13 +809,14 @@ def generate_pdf_doubling(res: dict, path: str):
     story.append(dtbl_2col([
         r3("1.","Existing Lineal Waterway",f"{res['exg_lw']:.3f} m"),
         r3("2.","Existing Area of Waterway up to OHFL", f"{res['exg_area']:.3f} m²"),
-        r3("3.","OHFL Discharge (Q)", f"{res['Q']:.3f} Cumecs"),
-        r3("4.","Standard Vertical Clearance (SS Code 4.8.1)",
-           f"{res['std_vc']:.2f} m" if res['std_vc'] > 0 else "--Nil-- (RCC Box / Closed section)"),
-        r3("5.","Existing Vertical Clearance (VC)", f"{res['exg_vc']:.3f} m"),
-        r3("6.","Required VC for Proposed Bridge",
+        r3("3.","Velocity Adopted", f"{res['velocity']:.2f} m/sec"),
+        r3("4.","OHFL Discharge (Q)", f"{res['Q']:.3f} Cumecs"),
+        r3("5.","Standard Vertical Clearance (SS Code 4.8.1)",
+           f"{res['std_vc']:.2f} m" if res['std_vc'] > 0 else "--Nil-- (RCC Box)"),
+        r3("6.","Existing Vertical Clearance (VC)", f"{res['exg_vc']:.3f} m"),
+        r3("7.","Required VC for Proposed Bridge",
            f"{res['req_vc']:.2f} m" if res['req_vc'] > 0 else "--Nil-- (Since RCC Box)"),
-        r3("7.","Existing Freeboard (FB)", f"{res['exg_fb']:.3f} m"),
+        r3("8.","Existing Freeboard (FB)", f"{res['exg_fb']:.3f} m"),
     ]))
     story.append(Spacer(1,5))
 
@@ -684,13 +826,17 @@ def generate_pdf_doubling(res: dict, path: str):
     fb_str = "ADEQUATE" if res['fb_ok'] else "INADEQUATE"
     area_str = "ADEQUATE" if res['area_ok'] else "INADEQUATE"
     story.append(dtbl_2col([
-        r3("8.","Required Area of Waterway (OHFL condition)",f"{res['req_area']:.3f} m²"),
-        r3("9.","Proposed Lineal Waterway",f"{res['prop_lw']:.3f} m"),
-        r3("10.","Depth of Flow (d)", f"{res['depth_d']:.3f} m"),
-        r3("11.","Calculated Highest Flood Level (CHFL)", f"{res['adopted_CHFL']:.3f} m" + (f"  (U/S OHFL governs)" if res['us_note'] else "")),
-        r3("12.","Proposed Vertical Clearance (VC)", res['prop_vc_str']),
-        r3("13.","Proposed Freeboard (FB)", f"{res['prop_fb']:.3f} m  [{fb_str}]"),
-        r3("14.","Proposed Area of Waterway (with Std.FB)", f"{res['prop_area_fb']:.3f} m²  [{area_str}]"),
+        r3("9.","Required Area of Waterway (OHFL condition)",f"{res['req_area']:.3f} m²"),
+        r3("10.","Proposed Lineal Waterway",f"{res['prop_lw']:.3f} m"),
+        r3("11.","Depth of Flow (d)", f"{res['depth_d']:.3f} m"),
+        r3("12.","Calculated Highest Flood Level (CHFL)", f"{res['adopted_CHFL']:.3f} m" + (f"  (U/S OHFL governs)" if res['us_note'] else "")),
+        r3("13.","Proposed Vertical Clearance (VC)", res['prop_vc_str']),
+        r3("14.","Proposed Freeboard (FB)", f"{res['prop_fb']:.3f} m  [{fb_str}]"),
+        r3("15.","Proposed Area of Waterway (with Std.FB)",
+           f"{res['prop_area_fb']:.3f} m²  [{area_str}]  "
+           f"({res['area_governed_by']} governs"
+           + (f": min({res['area_option_fb']:.3f}, {res['area_option_ch']:.3f})" if res['area_option_ch'] is not None else "")
+           + ")"),
     ]))
     story.append(Spacer(1,5))
 
@@ -700,7 +846,7 @@ def generate_pdf_doubling(res: dict, path: str):
                "FB\nProvided (m)","VC\nRequired (m)","VC\nProposed (m)",
                "Exg. L/W\n(m)","Prop. L/W\n(m)","Exg. Area\n(m²)","Prop. Area\nStd.FB (m²)","Req. Area\n(m²)"]
     sum_vals = ["--", f"{res['Q']:.3f}", "1.000", f"{res['prop_fb']:.3f}",
-                f"{res['std_vc']:.2f}" if res['std_vc'] > 0 else "--",
+                f"{res['req_vc']:.2f}" if res['req_vc'] > 0 else "--",
                 "--" if res['prop_vc_nil'] else f"{res['prop_vc_val']:.3f}",
                 f"{res['l_exg']:.3f}", f"{res['l_prop']:.3f}",
                 f"{res['exg_area']:.3f}", f"{res['prop_area_fb']:.3f}", f"{res['req_area']:.3f}"]
@@ -727,11 +873,11 @@ def generate_pdf_doubling(res: dict, path: str):
     v_tbl = Table([[Paragraph(vtext, S("vd",fontSize=9,fontName="Helvetica-Bold",textColor=vcolor,alignment=TA_CENTER))]],
                   colWidths=[W-2*M])
     v_tbl.setStyle(TableStyle([("BOX",(0,0),(-1,-1),1.2,vcolor),
-                               ("BACKGROUND",(0,0),(-1,-1),rc.HexColor("#f0fff8") if res['adequate'] else rc.HexColor("#fff0f0")),
+                               ("BACKGROUND",(0,0),(-1,-1),OK_BG if res['adequate'] else FAIL_BG),
                                ("TOPPADDING",(0,0),(-1,-1),6),("BOTTOMPADDING",(0,0),(-1,-1),6)]))
     story.append(v_tbl)
     story.append(Spacer(1,4))
-    story.append(Paragraph(f"Prepared by: Bridge Engineering Dept. | South Central Railway | Section: {res['section']}", note_s))
+    story.append(Paragraph(f"Prepared For: Bridge Engineering Dept. | South Central Railway | Section: {res['section']}", note_s))
     doc.build(story)
 
 
@@ -765,7 +911,7 @@ class PreviewWidget(QWidget):
     def _section(self, letter, title):
         lbl = QLabel(f"  {letter}   {title}")
         lbl.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        lbl.setStyleSheet(f"background:{COLORS['accent']}; color:#0D1117; padding:4px 8px; border-radius:4px;")
+        lbl.setStyleSheet(f"background:{COLORS['accent']}; color:{COLORS['text_inverted']}; padding:4px 8px; border-radius:4px;")
         self.content_lay.addWidget(lbl)
 
     def _row(self, label, value, highlight=False, ok=None):
@@ -773,11 +919,13 @@ class PreviewWidget(QWidget):
         frame.setStyleSheet(
             f"QFrame {{ background:{COLORS.get('hover_bg', COLORS['navy_light'])}; "
             f"border-radius:4px; border:1px solid {COLORS['border']}; }}")
+        frame.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         r = QHBoxLayout(frame)
-        r.setContentsMargins(10, 3, 10, 3)
+        r.setContentsMargins(10, 6, 10, 6)
         lw = QLabel(label)
         lw.setStyleSheet(f"color:{COLORS['text_secondary']}; font-size:12px; border:none;")
         lw.setWordWrap(True)
+        lw.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.MinimumExpanding)
         if ok is True:
             color = COLORS['accent']
         elif ok is False:
@@ -790,6 +938,7 @@ class PreviewWidget(QWidget):
         vw.setStyleSheet(f"font-weight:bold; font-size:12px; color:{color}; border:none;")
         vw.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         vw.setWordWrap(True)
+        vw.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.MinimumExpanding)
         r.addWidget(lw, 3)
         r.addWidget(vw, 2)
         self.content_lay.addWidget(frame)
@@ -818,10 +967,21 @@ class PreviewWidget(QWidget):
         self._row("C.H.F.L.", f"{res['CHFL']:.3f} m")
         self._row("Min. Formation Level Required", f"{res['min_FL_req']:.3f} m")
         self._row("Adopted Formation Level", f"{res['formation_level']:.3f} m")
+        self._row("Bottom of Slab (BOS)", f"{res['bos']:.3f} m")
+        self._row("Pro. Clear Span",
+                  f"{res['clear_span']:.3f} m" if res.get('clear_span') else "—")
         if res.get('provided_area') is not None:
-            self._row("Provided Area (W × H)",
-                      f"{res['width']:.2f} × {res['opening_height']:.2f} = {res['provided_area']:.3f} m²",
-                      ok=res['area_adequate'])
+            if "box" in res['structure_type'].lower():
+                self._row("Provided Area (Available Waterway)",
+                          f"{res['width']:.2f} × {res['opening_height']:.2f} = "
+                          f"{res['provided_area']:.3f} m²",
+                          ok=res['area_adequate'])
+            else:
+                self._row("Provided Area (Available Waterway)",
+                          f"{res['provided_area']:.3f} m²",
+                          ok=res['area_adequate'])
+        self._row("Std. Vertical Clearance (SS Code 4.8.1)",
+                  f"{res['std_vc']:.3f} m" if res['std_vc'] > 0 else "--Nil-- (RCC Box)")
         fb_ok = res['freeboard_ok']
         self._row("Net Freeboard",
                   f"{res['net_freeboard']:.3f} m  ({'✔ ADEQUATE' if fb_ok else '✘ INADEQUATE'})",
@@ -834,6 +994,7 @@ class PreviewWidget(QWidget):
         self._section("D", "EXISTING BRIDGE")
         self._row("Existing Lineal Waterway", f"{res['exg_lw']:.3f} m")
         self._row("Existing Area up to OHFL", f"{res['exg_area']:.3f} m²")
+        self._row("Velocity Adopted", f"{res['velocity']:.2f} m/sec")
         self._row("OHFL Discharge (Q)", f"{res['Q']:.3f} Cumecs", highlight=True)
         self._row("Std. Vertical Clearance", f"{res['std_vc']:.2f} m" if res['std_vc'] > 0 else "--Nil--")
         self._row("Existing Freeboard", f"{res['exg_fb']:.3f} m")
@@ -847,7 +1008,8 @@ class PreviewWidget(QWidget):
                   f"{res['prop_fb']:.3f} m  ({'✔ ADEQUATE' if res['fb_ok'] else '✘ INADEQUATE'})",
                   ok=res['fb_ok'])
         self._row("Proposed Area (Std.FB)",
-                  f"{res['prop_area_fb']:.3f} m²  ({'✔ > Req.' if res['area_ok'] else '✘ < Req.'})",
+                  f"{res['prop_area_fb']:.3f} m²  ({'✔ > Req.' if res['area_ok'] else '✘ < Req.'})"
+                  f"  [{res['area_governed_by']} governs]",
                   ok=res['area_ok'])
         self._row("Overall Verdict",
                   "✔  ADEQUATE" if res['adequate'] else "✘  INADEQUATE — Review",
@@ -866,13 +1028,15 @@ class PreviewWidget(QWidget):
 def _field(placeholder=""):
     f = QLineEdit()
     f.setPlaceholderText(placeholder)
-    f.setFixedHeight(32)
+    f.setFixedHeight(34)
+    f.setStyleSheet("QLineEdit{padding:4px 8px; font-size:13px;}")
     return f
 
 def _combo(items):
     c = QComboBox()
     c.addItems(items)
-    c.setFixedHeight(32)
+    c.setFixedHeight(34)
+    c.setStyleSheet("QComboBox{padding:4px 8px; font-size:13px;}")
     return c
 
 def _add_grid_row(grid, row, sl, label, widget, unit=""):
@@ -954,8 +1118,9 @@ class ModeSelectorWidget(QWidget):
 
         self.combo = QComboBox()
         self.combo.addItems(MODE_LABELS)
-        self.combo.setFixedHeight(28)
+        self.combo.setFixedHeight(30)
         self.combo.setFixedWidth(190)
+        self.combo.setStyleSheet("QComboBox{padding:3px 8px; font-size:12px;}")
         self.combo.setCursor(Qt.CursorShape.PointingHandCursor)
         self.combo.currentIndexChanged.connect(self._select)
         row.addWidget(self.combo)
@@ -990,7 +1155,7 @@ class NewLineForm(QWidget):
         # ── Section header ───────────────────────────────────────────
         hdr = QLabel("  A   DATA PROFILE  —  New Line (RBF-16)")
         hdr.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        hdr.setStyleSheet(f"background:{COLORS['accent']}; color:#0D1117; padding:3px 8px; border-radius:4px;")
+        hdr.setStyleSheet(f"background:{COLORS['accent']}; color:{COLORS['text_inverted']}; padding:3px 8px; border-radius:4px;")
         lay.addWidget(hdr)
 
         # ── Fields ──────────────────────────────────────────────────────
@@ -1008,7 +1173,8 @@ class NewLineForm(QWidget):
         self.f_soil.setStyleSheet("font-size:9px;")
         self.f_soil.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         self.f_soil.setMinimumContentsLength(1)
-        self.f_soil.view().setWordWrap(True)
+        # QListView has no word-wrap API; keep the dropdown narrow via the
+        # size-adjust policy above instead.
         self.f_area      = _field("0.2410")
         self.f_length    = _field("0.7000")
         self.f_hfarthest = _field("442.000")
@@ -1016,36 +1182,38 @@ class NewLineForm(QWidget):
         self.f_ohfl      = _field("441.600")
         self.f_r50       = _field("200.000")
         self.f_fl        = _field("444.618")
-        self.f_width     = _field("1.50")
-        self.f_height    = _field("1.50")   # opening height — box culverts only
-        self.f_slab      = _field("0.350")
-        self.f_tc_ratio  = _field("0.300")  # tc-hr ratio (Fig.4 RBF-16) — auto, editable
+        self.f_width      = _field("1.50")
+        self.f_height     = _field("1.50")   # opening height — box culverts only
+        self.f_clear_span = _field("3.00")   # Pro. Clear Span — proposed clear span
+        self.f_slab       = _field("0.350")
+        self.f_cushion    = _field("0.000")  # Earth Cushion — RCC BOX / ARCH only
+        self.f_tc_ratio   = _field("0.300")  # tc-hr ratio (Fig.4 RBF-16) — auto, editable
 
         for f in (self.f_area, self.f_length, self.f_hfarthest, self.f_bedlevel,
                   self.f_ohfl, self.f_r50, self.f_fl, self.f_width, self.f_height,
-                  self.f_slab, self.f_tc_ratio):
+                  self.f_clear_span, self.f_slab, self.f_cushion, self.f_tc_ratio):
             f.setValidator(QDoubleValidator())
 
         # Shared fixed pixel widths so every card's grid columns line up
         # identically — each _mini_section() call builds its own independent
         # QGridLayout, so stretch factors alone don't guarantee equal pixel
-        # widths across cards (e.g. a long combo box blows one card's column
-        # out relative to the other's). Fixing widths here removes that.
-        _LBL_W, _FLD_W, _UNIT_W = 118, 92, 30
+        # Column widths across cards (fixed for consistent UX).
+        # UPDATED: +25% wider for premium, more spacious appearance.
+        _LBL_W, _FLD_W, _UNIT_W = 148, 115, 38
 
         def _mini_section(title, rows_data, refs=None):
             """Build a compact full-width card with label:field rows (2 sub-columns)."""
             frm = QFrame(); frm.setObjectName("card")
             fl = QVBoxLayout(frm)
-            fl.setContentsMargins(8, 6, 8, 6)
-            fl.setSpacing(3)
+            fl.setContentsMargins(14, 10, 14, 10)  # Increased padding for premium look
+            fl.setSpacing(6)  # Better spacing between rows
             t = QLabel(title)
-            t.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
-            t.setStyleSheet(f"color:{COLORS['accent']}; font-size:10px;")
+            t.setFont(QFont("-apple-system, 'SF Pro Display'", 11, QFont.Weight.Bold))  # Larger, bolder title
+            t.setStyleSheet(f"color:{COLORS['accent']}; font-size:12px; letter-spacing:0.5px;")  # Letter spacing for premium
             fl.addWidget(t)
             g = QGridLayout()
-            g.setHorizontalSpacing(10)
-            g.setVerticalSpacing(3)
+            g.setHorizontalSpacing(14)  # Better spacing between columns
+            g.setVerticalSpacing(6)  # Better row spacing
             n = len(rows_data)
             half = (n + 1) // 2
             for i, (lbl_text, widget, unit) in enumerate(rows_data):
@@ -1054,7 +1222,7 @@ class NewLineForm(QWidget):
                 lbl = QLabel(lbl_text)
                 lbl.setWordWrap(True)
                 lbl.setFixedWidth(_LBL_W)
-                lbl.setStyleSheet("color: " + COLORS['text_secondary'] + "; font-size: 11px;")
+                lbl.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px; font-weight: 500;")  # Better text styling
                 widget.setFixedWidth(_FLD_W)
                 g.addWidget(lbl, r, col_block)
                 g.addWidget(widget, r, col_block + 1)
@@ -1062,12 +1230,10 @@ class NewLineForm(QWidget):
                 if unit:
                     u = QLabel(unit)
                     u.setFixedWidth(_UNIT_W)
-                    u.setStyleSheet(f"color:{COLORS['text_muted']}; font-size:10px;")
+                    u.setStyleSheet(f"color:{COLORS['text_muted']}; font-size:11px; font-weight:400;")
                     g.addWidget(u, r, col_block + 2)
                 if refs is not None:
                     refs[lbl_text] = (lbl, widget, u)
-            # Trailing stretch column absorbs leftover width on both sub-blocks
-            # so the fixed-width columns stay pinned left instead of spreading.
             g.setColumnStretch(2, 0); g.setColumnStretch(5, 0)
             g.setColumnStretch(6, 1)
             fl.addLayout(g)
@@ -1104,9 +1270,11 @@ class NewLineForm(QWidget):
             ("O.H.F.L.",           self.f_ohfl,      "m"),
             ("R50 (24hr)",         self.f_r50,       "mm"),
             ("Formation Level",    self.f_fl,        "m"),
-            ("Opening Width",      self.f_width,     "m"),
-            ("Opening Height",     self.f_height,    "m"),
-            ("Slab Thickness",     self.f_slab,      "m"),
+            ("Opening Width",      self.f_width,      "m"),
+            ("Pro. Clear Span",    self.f_clear_span, "m"),
+            ("Opening Height",     self.f_height,     "m"),
+            ("Slab Thickness",     self.f_slab,       "m"),
+            ("Earth Cushion",      self.f_cushion,    "m"),
             ("tc-hr Ratio (Fig.4)", self.f_tc_ratio,  ""),
         ], refs=self._hydro_refs)
         lay.addWidget(hydro_card)
@@ -1123,7 +1291,10 @@ class NewLineForm(QWidget):
 
         # Opening Height only relevant for box-type structures
         self._toggle_opening_height()
+        # Earth Cushion entry available only for RCC BOX / ARCH structures
+        self._toggle_earth_cushion()
         self.f_struct.currentTextChanged.connect(self._toggle_opening_height)
+        self.f_struct.currentTextChanged.connect(self._toggle_earth_cushion)
 
         # Auto-calc tc-hr ratio (Fig.4) from current inputs; stays editable
         self._tc_ratio_user_edited = False
@@ -1142,6 +1313,18 @@ class NewLineForm(QWidget):
         widget.setVisible(is_box)
         if unit:
             unit.setVisible(is_box)
+
+    def _toggle_earth_cushion(self):
+        """Show 'Earth Cushion' input only for RCC BOX / ARCH structure types;
+        every other type is forced to 0 (field hidden and cleared)."""
+        show = self.f_struct.currentText().upper() in ("RCC BOX", "ARCH")
+        lbl, widget, unit = self._hydro_refs["Earth Cushion"]
+        lbl.setVisible(show)
+        widget.setVisible(show)
+        if unit:
+            unit.setVisible(show)
+        if not show:
+            widget.clear()
 
     def _mark_tc_ratio_edited(self, text):
         self._tc_ratio_user_edited = bool(text.strip())
@@ -1182,6 +1365,8 @@ class NewLineForm(QWidget):
             "formation_level": self.f_fl.text().strip() or "0",
             "width": self.f_width.text().strip() or "1.5",
             "opening_height": self.f_height.text().strip() if self.f_height.isVisible() else "",
+            "pro_clear_span": self.f_clear_span.text().strip(),
+            "earth_cushion": self.f_cushion.text().strip() if self.f_cushion.isVisible() else "",
             "slab_thickness": self.f_slab.text().strip() or "0.35",
             "soil_type": self.f_soil.currentText(),
             "sub_zone": self.f_subzone.currentText(),
@@ -1193,7 +1378,8 @@ class NewLineForm(QWidget):
         for f in (self.f_section, self.f_bridge, self.f_chainage, self.f_opening,
                   self.f_latlon, self.f_area, self.f_length, self.f_hfarthest,
                   self.f_bedlevel, self.f_ohfl, self.f_r50, self.f_fl,
-                  self.f_width, self.f_height, self.f_slab):
+                  self.f_width, self.f_height, self.f_clear_span, self.f_slab,
+                  self.f_cushion):
             f.clear()
         self._tc_ratio_user_edited = False
         self._recalc_tc_ratio()
@@ -1221,7 +1407,7 @@ class DoublingForm(QWidget):
         # ── Section header ───────────────────────────────────────────
         hdr1 = QLabel("  A   DATA PROFILE  —  Doubling / Tripling / Quadrupling")
         hdr1.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        hdr1.setStyleSheet(f"background:{COLORS['accent']}; color:#0D1117; padding:3px 8px; border-radius:4px;")
+        hdr1.setStyleSheet(f"background:{COLORS['accent']}; color:{COLORS['text_inverted']}; padding:3px 8px; border-radius:4px;")
         lay.addWidget(hdr1)
 
         # ── All fields declared ──────────────────────────────────────
@@ -1249,10 +1435,17 @@ class DoublingForm(QWidget):
         self.f_span_type_prop = _combo(SPAN_TYPES)
         self.f_l_prop         = _field("1.00")
         self.f_ch_prop        = _field("1.20")           # Clear Height — visible when RCC Box
+        self.f_bl_prop        = _field("")               # Pro. BL — auto-filled from Exg. BL, override allowed
         self.f_rl_prop        = _field("186.152")
-        self.f_fl_prop        = _field("173.095")
+        self.f_fl_prop        = _field("173.095")        # Auto-filled = RL - 0.762, override allowed
         self.f_bos_prop       = _field("172.333")
         self.f_us_ohfl        = _field("U/S OHFL (optional)")
+        
+        # Override checkboxes — allow user to disable autofill
+        self.chk_bl_auto      = QCheckBox("Auto-fill from Exg. BL")
+        self.chk_bl_auto.setChecked(True)
+        self.chk_fl_auto      = QCheckBox("Auto-calculate (RL - 0.762)")
+        self.chk_fl_auto.setChecked(True)
 
         for f in (self.f_l_exg, self.f_ch_exg, self.f_rl_exg, self.f_fl_exg, self.f_bos_exg,
                   self.f_ohfl, self.f_bl, self.f_l_prop, self.f_ch_prop, self.f_rl_prop,
@@ -1274,9 +1467,21 @@ class DoublingForm(QWidget):
                 sig.connect(self._update_span_descs)
             # Auto-update FL when RL changes (proposed only)
             self.f_rl_prop.textChanged.connect(self._autofill_prop_fl)
+            self.f_bl.textChanged.connect(self._autofill_prop_bl)
+            self.chk_bl_auto.stateChanged.connect(self._on_bl_auto_toggled)
+            self.chk_fl_auto.stateChanged.connect(self._on_fl_auto_toggled)
             # Show/hide Clear Height based on span type selection
             self.f_span_type_exg.currentTextChanged.connect(self._toggle_clear_height)
             self.f_span_type_prop.currentTextChanged.connect(self._toggle_clear_height)
+
+        # Load recent values from history
+        dm = get_data_manager()
+        recent_section = dm.get_recent_section()
+        if recent_section:
+            self.f_section.setText(recent_section)
+        recent_stations = dm.get_recent_between_stations()
+        if recent_stations:
+            self.f_chainage.setText(recent_stations)
 
         _connect_span_autofill()
 
@@ -1327,7 +1532,7 @@ class DoublingForm(QWidget):
             ("Prop. Span",   self.f_prop_desc,    ""),
         ])
 
-        exg_card = _card("EXISTING BRIDGE", COLORS.get('navy_mid','#1e3a5f'), [
+        exg_card = _card("EXISTING BRIDGE", COLORS['accent_3'], [
             ("No. Spans",    self.f_n_spans_exg,  ""),
             ("Span Type",    self.f_span_type_exg, ""),
             ("L/Waterway",   self.f_l_exg,        "m"),
@@ -1339,21 +1544,22 @@ class DoublingForm(QWidget):
             ("Bed Level",    self.f_bl,           "m"),
         ])
         exg_card.setStyleSheet(
-            "QFrame#card { border:1.5px solid " + COLORS.get('navy_mid','#1e3a5f') + "; }"
+            "QFrame#card { border:1.5px solid " + COLORS['accent_3'] + "; }"
         )
 
-        prop_card = _card("PROPOSED BRIDGE", "#e05050", [
+        prop_card = _card("PROPOSED BRIDGE", COLORS['error'], [
             ("No. Spans",    self.f_n_spans_prop,  ""),
             ("Span Type",    self.f_span_type_prop, ""),
             ("L/Waterway",   self.f_l_prop,        "m"),
             ("Clear Height", self.f_ch_prop,       "m"),
+            ("Bed Level",    self.f_bl_prop,       "m"),  # Auto-filled from Exg. BL
             ("RL",           self.f_rl_prop,       "m"),
-            ("FL",           self.f_fl_prop,       "m"),   # autofilled = RL - 0.762
+            ("FL",           self.f_fl_prop,       "m"),   # Auto-filled = RL - 0.762
             ("BOS",          self.f_bos_prop,      "m"),
             ("U/S OHFL",     self.f_us_ohfl,       "m"),
         ])
         prop_card.setStyleSheet(
-            "QFrame#card { border:1.5px solid #e05050; }"
+            "QFrame#card { border:1.5px solid " + COLORS['error'] + "; }"
         )
 
         three_col.addWidget(gen_card,  3)
@@ -1427,7 +1633,9 @@ class DoublingForm(QWidget):
         )
 
     def _autofill_prop_fl(self):
-        """Auto-compute Proposed FL = RL - 0.762 when RL changes."""
+        """Auto-compute Proposed FL = RL - 0.762 when RL changes (if enabled)."""
+        if not self.chk_fl_auto.isChecked():
+            return
         try:
             rl = float(self.f_rl_prop.text().strip())
             fl = round(rl - 0.762, 3)
@@ -1436,6 +1644,36 @@ class DoublingForm(QWidget):
                 f"border:1.5px solid {COLORS['accent']}; border-radius:4px;"
             )
         except ValueError:
+            self.f_fl_prop.setStyleSheet("")
+
+    def _autofill_prop_bl(self):
+        """Auto-fill Proposed BL from Existing BL (if enabled)."""
+        if not self.chk_bl_auto.isChecked():
+            return
+        try:
+            exg_bl = self.f_bl.text().strip()
+            if exg_bl:
+                self.f_bl_prop.setText(exg_bl)
+                self.f_bl_prop.setStyleSheet(
+                    f"border:1.5px solid {COLORS['accent_2']}; border-radius:4px;"
+                )
+            else:
+                self.f_bl_prop.setStyleSheet("")
+        except ValueError:
+            self.f_bl_prop.setStyleSheet("")
+
+    def _on_bl_auto_toggled(self):
+        """Handle BL autofill checkbox toggle."""
+        if self.chk_bl_auto.isChecked():
+            self._autofill_prop_bl()
+        else:
+            self.f_bl_prop.setStyleSheet("")
+
+    def _on_fl_auto_toggled(self):
+        """Handle FL autofill checkbox toggle."""
+        if self.chk_fl_auto.isChecked():
+            self._autofill_prop_fl()
+        else:
             self.f_fl_prop.setStyleSheet("")
 
     def _toggle_clear_height(self):
@@ -1489,18 +1727,16 @@ class HydraulicPanel(QWidget):
         # here — that space goes back to the A. Data Profile card instead.
         self._mode_sel = ModeSelectorWidget(self._on_mode_selected)
 
-        self._extract_btn = QPushButton("🤖  Smart Extract")
-        self._extract_btn.setObjectName("secondaryBtn")
-        self._extract_btn.setFixedHeight(28)
-        self._extract_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._extract_btn = AnimatedProgressButton("Smart Extract")
         self._extract_btn.setToolTip(
             "Browse for a Drawing / PDF / Excel file to auto-fill this form."
         )
         self._extract_btn.clicked.connect(self._trigger_smart_extract)
 
-        self._toggle_btn = QPushButton("⬅  Hide Preview")
+        self._toggle_btn = styled_button("Hide Preview", "chevron-left")
         self._toggle_btn.setObjectName("secondaryBtn")
-        self._toggle_btn.setFixedHeight(28)
+        self._toggle_btn.setMinimumHeight(34)
+        self._toggle_btn.setStyleSheet("QPushButton { padding: 0 14px; }")
         self._toggle_btn.setCheckable(True)
         self._toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._toggle_btn.setToolTip("Hide/show the calculation preview panel")
@@ -1538,36 +1774,51 @@ class HydraulicPanel(QWidget):
         btn_row.setContentsMargins(0, 0, 0, 0)
         btn_row.setSpacing(10)
 
-        self._calc_btn = QPushButton("⚡  Calculate")
+        self._calc_btn = styled_button("Calculate", "bolt", color="#FFFFFF")
         self._calc_btn.setObjectName("primaryBtn")
         self._calc_btn.setFixedHeight(40)
         self._calc_btn.clicked.connect(self._calculate)
         btn_row.addWidget(self._calc_btn)
 
-        self._dl_btn = QPushButton("⬇  Download PDF")
+        self._dl_btn = styled_button("Download PDF", "download")
         self._dl_btn.setObjectName("secondaryBtn")
         self._dl_btn.setFixedHeight(40)
         self._dl_btn.setEnabled(False)
         self._dl_btn.clicked.connect(self._download_pdf)
         btn_row.addWidget(self._dl_btn)
 
+        # Attach a drawing/PDF/image to append as the final page of the
+        # downloaded calculation PDF (e.g. the GAD sheet the calc was
+        # based on, for a self-contained record).
+        self._attachment_path = None
+        self._attach_btn = styled_button("Attach Drawing", "attach")
+        self._attach_btn.setObjectName("secondaryBtn")
+        self._attach_btn.setFixedHeight(40)
+        self._attach_btn.setToolTip(
+            "Optional: attach a PDF or image to append as the last page "
+            "of the downloaded calculation PDF."
+        )
+        self._attach_btn.clicked.connect(self._choose_attachment)
+        btn_row.addWidget(self._attach_btn)
+
         # Scour Depth Calc — same shape/size as Calculate, distinct color.
         # Only computes/opens the scour panel when the user clicks it.
-        self._scour_btn = QPushButton("🌊  Scour Depth Calc")
+        self._scour_btn = styled_button("Scour Depth Calc", "water")
         self._scour_btn.setFixedHeight(40)
         self._scour_btn.setCheckable(True)
         self._scour_btn.setEnabled(False)
+        _w = COLORS['warning']
         self._scour_btn.setStyleSheet(
-            "QPushButton { background:#C9821A; color:#0D1117; border:none; "
-            "border-radius:6px; padding:0 16px; font-weight:600; }"
-            "QPushButton:hover:!disabled { background:#E0973A; }"
-            "QPushButton:checked { background:#A56A14; }"
-            "QPushButton:disabled { background:#4a4a4a; color:#8a8a8a; }"
+            f"QPushButton {{ background:{_w}; color:{COLORS['text_inverted']}; border:none; "
+            f"border-radius:10px; padding:0 16px; font-weight:700; }}"
+            f"QPushButton:hover:!disabled {{ background:{shade(_w, 1.18)}; }}"
+            f"QPushButton:checked {{ background:{shade(_w, 0.85)}; }}"
+            f"QPushButton:disabled {{ background:{COLORS['disabled_bg']}; color:{COLORS['disabled_text']}; }}"
         )
         self._scour_btn.clicked.connect(self._toggle_scour)
         btn_row.addWidget(self._scour_btn)
 
-        self._clear_btn = QPushButton("✕  Clear")
+        self._clear_btn = styled_button("Clear", "cross")
         self._clear_btn.setObjectName("dangerBtn")
         self._clear_btn.setFixedHeight(40)
         self._clear_btn.clicked.connect(self._clear)
@@ -1601,7 +1852,14 @@ class HydraulicPanel(QWidget):
 
         right_lay.addSpacing(12)
         self._preview = PreviewWidget()
-        right_lay.addWidget(self._preview, 1)
+        self._preview.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        prev_scroll = QScrollArea()
+        prev_scroll.setWidgetResizable(True)
+        prev_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        prev_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        prev_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        prev_scroll.setWidget(self._preview)
+        right_lay.addWidget(prev_scroll, 1)
 
         self._splitter.addWidget(self._right_container)
 
@@ -1650,12 +1908,14 @@ class HydraulicPanel(QWidget):
             # Hide: collapse right pane, give all space to left
             self._right_container.setVisible(False)
             self._splitter.setSizes([1, 0])
-            self._toggle_btn.setText("➡  Show Preview")
+            self._toggle_btn.setText("Show Preview")
+            self._toggle_btn.setIcon(icon("chevron-right", COLORS["text_secondary"], 18))
         else:
             # Show: restore 50/50 split
             self._right_container.setVisible(True)
             self._splitter.setSizes([500, 500])
-            self._toggle_btn.setText("⬅  Hide Preview")
+            self._toggle_btn.setText("Hide Preview")
+            self._toggle_btn.setIcon(icon("chevron-left", COLORS["text_secondary"], 18))
 
     # ── Smart Extract (top-bar button proxy) ───────────────────────────────────
 
@@ -1677,7 +1937,9 @@ class HydraulicPanel(QWidget):
 
         extractor = zone.findChild(SmartExtractWidget)
         if extractor is not None:
-            extractor.trigger_browse()
+            extractor.cancel_current()   # abort any stuck/previous extraction first
+            self._extract_btn.start()
+            extractor.trigger_browse()   # (also no-ops cancel_current internally — harmless)
         else:
             QMessageBox.information(
                 self, "Smart Extract",
@@ -1723,6 +1985,11 @@ class HydraulicPanel(QWidget):
         extractor = SmartExtractWidget(mode=mode, parent_form=form, parent=zone)
         zone.layout().addWidget(extractor)
 
+        extractor.progressChanged.connect(self._extract_btn.set_progress)
+        extractor.extractionFinished.connect(lambda fields: self._extract_btn.finish(True))
+        extractor.extractionFailed.connect(lambda msg: self._extract_btn.finish(False))
+        extractor.extractionCancelled.connect(self._extract_btn.cancel)
+
     # ── Calculate ─────────────────────────────────────────────────────────────
 
     def _calculate(self):
@@ -1730,12 +1997,38 @@ class HydraulicPanel(QWidget):
             QMessageBox.information(self, "Select Mode", "Please select a calculation mode first.")
             return
 
+        # Save Section and Between Stations to history for autofill
+        dm = get_data_manager()
+        if self._mode == "1":
+            section = self._form_newline.f_section.text().strip()
+            stations = self._form_newline.f_chainage.text().strip()
+        else:
+            section = self._form_doubling.f_section.text().strip()
+            stations = self._form_doubling.f_chainage.text().strip()
+        
+        if section:
+            dm.add_section(section)
+        if stations:
+            dm.add_between_stations(stations)
+
         if self._mode == "1":
             inp = self._form_newline.get_inputs()
-            res = compute_newline(inp)
+            try:
+                res = compute_newline(inp)
+            except Exception as e:
+                import traceback
+                QMessageBox.critical(self, "Calculation Error",
+                    f"Could not compute:\n{e}\n\n{traceback.format_exc()[-500:]}")
+                return
         else:
             inp = self._form_doubling.get_inputs()
-            res = compute_doubling(inp)
+            try:
+                res = compute_doubling(inp)
+            except Exception as e:
+                import traceback
+                QMessageBox.critical(self, "Calculation Error",
+                    f"Could not compute:\n{e}\n\n{traceback.format_exc()[-500:]}")
+                return
 
         if "error" in res:
             QMessageBox.warning(self, "Input Error", res["error"])
@@ -1757,6 +2050,22 @@ class HydraulicPanel(QWidget):
         # otherwise it stays closed until "Scour Depth Calc" is clicked.
         if self._scour_container.isVisible():
             self._scour_panel.autofill(res)
+
+    # ── Attach drawing (appended as last page of downloaded PDF) ───────────────
+
+    def _choose_attachment(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Drawing / PDF / Image to Attach",
+            "",
+            "PDF or Image (*.pdf *.png *.jpg *.jpeg *.bmp *.tiff *.tif);;"
+            "PDF (*.pdf);;Images (*.png *.jpg *.jpeg *.bmp *.tiff *.tif)"
+        )
+        if path:
+            self._attachment_path = path
+            self._attach_btn.setText(os.path.basename(path))
+        else:
+            self._attachment_path = None
+            self._attach_btn.setText("Attach Drawing")
 
     # ── Download PDF ──────────────────────────────────────────────────────────
 
@@ -1788,10 +2097,39 @@ class HydraulicPanel(QWidget):
         self._status_lbl.setStyleSheet(f"color:{COLORS['text_muted']}; font-size:11px;")
 
         try:
+            # Generate to a temp path first so the attachment merge (if any)
+            # never risks corrupting/partially-overwriting the user's chosen
+            # output path on failure.
+            temp_path = path + ".tmp"
             if self._mode == "1":
-                generate_pdf_newline(self._result, path)
+                generate_pdf_newline(self._result, temp_path)
             else:
-                generate_pdf_doubling(self._result, path)
+                generate_pdf_doubling(self._result, temp_path)
+
+            if self._attachment_path:
+                self._status_lbl.setText("Attaching drawing as last page...")
+                try:
+                    _append_attachment_page(temp_path, self._attachment_path, path)
+                except ImportError:
+                    QMessageBox.critical(
+                        self, "Missing Library",
+                        "PyMuPDF is required to attach a drawing to the PDF.\n\n"
+                        "Run this command in your terminal:\n"
+                        f"  {sys.executable} -m pip install pymupdf\n\n"
+                        "The calculation PDF was still saved without the attachment."
+                    )
+                    os.replace(temp_path, path)
+                except Exception as e:
+                    QMessageBox.warning(
+                        self, "Attachment Error",
+                        f"Could not attach drawing: {e}\n\n"
+                        "The calculation PDF was still saved without it."
+                    )
+                    os.replace(temp_path, path)
+                else:
+                    os.remove(temp_path)
+            else:
+                os.replace(temp_path, path)
 
             if os.path.exists(path) and os.path.getsize(path) > 0:
                 self._status_lbl.setText(
@@ -1831,6 +2169,8 @@ class HydraulicPanel(QWidget):
         self._form_newline.clear()
         self._form_doubling.clear()
         self._result = None
+        self._attachment_path = None
+        self._attach_btn.setText("Attach Drawing")
         self._dl_btn.setEnabled(False)
         self._scour_btn.setEnabled(False)
         self._scour_btn.setChecked(False)

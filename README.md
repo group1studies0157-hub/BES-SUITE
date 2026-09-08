@@ -29,10 +29,11 @@ The app is a sidebar shell with seven pages:
 | 0 | **CD Processing** | Enter bridge numbers, pick a mode (Full CD / Drawings / Quantities / Specs / Cross-Ref), run the pipeline with live progress and run history. |
 | 1 | **CAD Process** | Upload an image/PDF drawing → AI (or OpenCV fallback) detects geometry, dimensions, text, hatching → outputs an AutoLISP script + editable DXF. |
 | 2 | **CAD Process 2** | Second-generation CAD extraction workflow. |
-| 3 | **GAD Checking** | General Arrangement Drawing verification. |
-| 4 | **Hydraulic Calculations** | Hydraulic computations with OCR-assisted parameter extraction. |
-| 5 | **Knowledge Base** | Study/reference tools. |
-| 6 | **Settings** | Theme (dark/light) and API keys. |
+| 3 | **GAD Generator** | **Prompt + dimensions → parametric GAD.** Describe the bridge (spans, RL/FL/BL/HFL, span type), get a draft General Arrangement Drawing as AutoLISP + DXF. |
+| 4 | **GAD Checking** | General Arrangement Drawing verification. |
+| 5 | **Hydraulic Calculations** | Hydraulic computations with OCR-assisted parameter extraction. |
+| 6 | **Knowledge Base** | Study/reference tools. |
+| 7 | **Settings** | Theme (dark/light) and API keys. |
 
 ---
 
@@ -80,6 +81,62 @@ Get keys at: https://console.anthropic.com  and  https://aistudio.google.com
 | TITLEBLOCK | Cyan | Source, date, scale info |
 
 Load the LISP in AutoCAD with `(load "file.lsp")` then run `(BES-DRAW)`, or open the `.DXF` directly in any CAD tool (AutoCAD, BricsCAD, LibreCAD, FreeCAD).
+
+---
+
+## GAD Generator (Panel 3)
+
+The **inverse** of CAD Process: instead of reading a drawing, you *describe* it
+and the suite drafts a General Arrangement Drawing for you. The engine is
+**fully dynamic** — one generator, many bridges — driven by per-bridge levels
+and the span-type catalogue in `core/gad_standards.py` (seeded from the
+standard documentation / reference GAD set).
+
+1. Open **GAD Generator** in the sidebar.
+2. Type a prompt with dimensions, e.g.:
+   `3KK: (1x4.25+1x4.5+1x4.25)x1.50 m RCC BOX, RL 178.741, FL 177.979, BL 175.877, HFL 176.877, max scour 174.5, 2 tracks C/C 9450, 25T-2008`
+3. **Generate with AI** (Claude/Gemini fills the structured parameter schema,
+   with deterministic fallback) or **Generate (offline)**. Optionally pick a
+   span type from the catalogue to apply RDSO defaults.
+4. Inspect the **live in-app preview** (rendered locally with Pillow — no
+   AutoCAD needed; zoom Fit/25–150%). Untick **"Save DXF + LISP files"** to
+   preview only, without writing anything.
+5. Outputs (when saving): `<bridge>-GAD.dxf` (open directly in AutoCAD → Save
+   As DWG), `<bridge>-GAD.lsp` (load in AutoCAD, run `BES-GAD`) and
+   `<bridge>-GAD-preview.png`.
+
+**Dynamic inputs** — anything the prompt mentions changes the drawing:
+
+| Input | Effect |
+|-------|--------|
+| `RL` / `FL` / `BL` | rail / formation / bed levels → construction depths, wall & return-wall heights |
+| `HFL` | water line drawn at its real level + `F.B. =` freeboard note |
+| `max scour` | foundation extended below scour + foundation-level & scour markers |
+| span expression (`(1x4.25+1x4.5+1x4.25)x1.50 m`) | any number of cells / spans, any vent height |
+| `N tracks C/C xxxx` | single / double / multi-track layout & track centre lines |
+| span family (`RCC box`, `PSC slab`, `PSC girder`, `box girder`, `steel girder`, `FOB`) | matching view template + RDSO defaults + standard notes |
+| engineering fit checks | automatic WARNING notes when the box stack exceeds depth below formation or freeboard is negative |
+
+Span families and their defaults live in `core/gad_standards.py` — edit to
+match your approved section drawings. The input schema mirrors
+`core/param_extractor.py` dataclasses, so a GAD you extract can be
+round-tripped straight back into a generated drawing.
+
+### Batch generation — many bridges from one spreadsheet
+```
+python batch_gad.py bridges.csv --out ./generated --json
+python batch_gad.py bridges.xlsx          # openpyxl required
+python batch_gad.py --sample             # write a template first
+```
+Each row is a `prompt` (same free-text format as above) plus optional override
+columns (`bridge_no`, `span_type`, `rail_level_m`, `formation_level_m`,
+`bed_level_m`, `hfl_m`, `scour_level_m`, `num_tracks`, `track_centres_mm`, …).
+Per-bridge folders: `./generated/<bridge_no>/<bridge_no>-GAD.dxf|.lsp`.
+
+Single bridge, headless:
+```
+python generate_gad.py "2x9.15 m PSC slab at CH 52.300, RL 112.25, FL 111.15, BL 108.2, HFL 109.4" --offline --out ./out
+```
 
 ---
 

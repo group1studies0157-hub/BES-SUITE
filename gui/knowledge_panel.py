@@ -9,13 +9,14 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QComboBox, QLineEdit, QTextEdit,
     QSplitter, QListWidget, QListWidgetItem, QProgressBar,
-    QSizePolicy, QApplication, QFileDialog,
+    QSizePolicy, QApplication, QFileDialog, QDialog,
     QTableWidget, QTableWidgetItem, QHeaderView
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings, QTimer
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtGui import QFont, QColor, QPixmap
 
 from gui.styles import COLORS
+from gui.icons import icon_path as get_icon_path
 from gui.ai_provider import (AIProvider, PROVIDERS, PROVIDER_ANTHROPIC,
                               PROVIDER_GEMINI, detect_provider,
                               ANTHROPIC_MODEL)
@@ -1396,34 +1397,134 @@ class KnowledgePanel(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # Header strip
-        header = QFrame(); header.setObjectName("card")
-        header.setStyleSheet(f"QFrame#card{{background:{COLORS['navy']};border:none;border-radius:0px;padding:0px;}}")
-        hrow = QHBoxLayout(header); hrow.setContentsMargins(32, 16, 32, 16)
-        ht = QLabel("📚  Knowledge Base")
-        ht.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
-        ht.setStyleSheet(f"color:{COLORS['accent']};")
-        hrow.addWidget(ht)
-        hrow.addStretch()
-        hs = QLabel("LDCE Railway Exam · PYQ-Based Practice · AI-Powered Search")
-        hs.setStyleSheet(f"color:{COLORS['text_sidebar']};font-size:12px;")
-        hrow.addWidget(hs)
-        outer.addWidget(header)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
 
-        # Main splitter (Quiz top | Search bottom)
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.setHandleWidth(6)
-        splitter.setStyleSheet(f"QSplitter::handle{{background:{COLORS['border']};border-radius:2px;}}")
-        outer.addWidget(splitter)
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(32, 28, 32, 32)
+        layout.setSpacing(20)
+        scroll.setWidget(container)
+        outer.addWidget(scroll)
 
-        splitter.addWidget(self._build_quiz_section())
-        splitter.addWidget(self._build_import_section())
-        splitter.addWidget(self._build_search_section())
-        splitter.setSizes([480, 200, 320])
+        layout.addWidget(self._kb_hero())
+
+        tools_card = QFrame(); tools_card.setObjectName("card")
+        tools_layout = QVBoxLayout(tools_card)
+        tools_layout.setContentsMargins(20, 18, 20, 18)
+        tools_layout.setSpacing(10)
+        header = QLabel("Tools")
+        header.setObjectName("sectionHeader")
+        tools_layout.addWidget(header)
+
+        # Build every section once (unchanged internally) so all cross-referenced
+        # widgets/attributes exist — e.g. the search index builder reads
+        # self.topic_combo from the quiz section. Each section then lives in its
+        # own resizable dialog instead of being crammed onto one fixed-size page,
+        # which is what caused the overlap on smaller screens.
+        quiz_frame = self._build_quiz_section()
+        import_frame = self._build_import_section()
+        search_frame = self._build_search_section()
+
+        self._quiz_dialog = self._make_tool_dialog("Quiz Section", quiz_frame, 1180, 760)
+        self._import_dialog = self._make_tool_dialog("Import Questions from File", import_frame, 900, 640)
+        self._search_dialog = self._make_tool_dialog("Code & Manual Search Engine", search_frame, 1180, 760)
+
+        tools_layout.addWidget(self._tool_card(
+            "quiz", "Quiz Section",
+            "Practice LDCE-pattern questions with instant scoring.", self._quiz_dialog))
+        tools_layout.addWidget(self._tool_card(
+            "import", "Import Questions from File",
+            "Add new questions to the local bank from a file.", self._import_dialog))
+        tools_layout.addWidget(self._tool_card(
+            "codesearch", "Code & Manual Search Engine",
+            "Search indexed manuals and codes by keyword.", self._search_dialog))
+
+        layout.addWidget(tools_card)
+        layout.addStretch()
+
+    def _kb_hero(self) -> QFrame:
+        hero = QFrame()
+        hero.setObjectName("heroBanner")
+        lay = QVBoxLayout(hero)
+        lay.setContentsMargins(28, 24, 28, 24)
+        lay.setSpacing(6)
+
+        kicker = QLabel("KNOWLEDGE BASE")
+        kicker.setObjectName("heroKicker")
+        title = QLabel("LDCE Railway Exam Prep & Reference")
+        title.setObjectName("heroTitle")
+        title.setWordWrap(True)
+        subtitle = QLabel("PYQ-based quiz practice, question bank import, and fast manual search.")
+        subtitle.setObjectName("heroSubtitle")
+        subtitle.setWordWrap(True)
+
+        lay.addWidget(kicker)
+        lay.addWidget(title)
+        lay.addWidget(subtitle)
+        return hero
+
+    def _tool_card(self, icon_key: str, name: str, meta: str, dialog: QDialog) -> QFrame:
+        card = QFrame()
+        card.setObjectName("storeCard")
+        row = QHBoxLayout(card)
+        row.setContentsMargins(14, 12, 14, 12)
+        row.setSpacing(14)
+
+        icon_lbl = QLabel()
+        icon_lbl.setObjectName("storeIcon")
+        icon_lbl.setFixedSize(46, 46)
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        path = get_icon_path(icon_key)
+        if path:
+            pix = QPixmap(path).scaled(
+                46, 46, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+            )
+            icon_lbl.setPixmap(pix)
+        row.addWidget(icon_lbl)
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(2)
+        name_lbl = QLabel(name)
+        name_lbl.setObjectName("storeAppName")
+        meta_lbl = QLabel(meta)
+        meta_lbl.setObjectName("storeAppMeta")
+        meta_lbl.setWordWrap(True)
+        text_col.addWidget(name_lbl)
+        text_col.addWidget(meta_lbl)
+        row.addLayout(text_col, 1)
+
+        open_btn = QPushButton("Open")
+        open_btn.setObjectName("openBtn")
+        open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_btn.setFixedWidth(84)
+        open_btn.clicked.connect(lambda: (dialog.show(), dialog.raise_(), dialog.activateWindow()))
+        row.addWidget(open_btn)
+        return card
+
+    def _make_tool_dialog(self, title: str, content: QWidget, width: int, height: int) -> QDialog:
+        """House one section's existing widget tree in its own resizable window,
+        so it gets real estate independent of the main window's size."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.setStyleSheet(self.window().styleSheet() if self.window() else "")
+        dlg.resize(width, height)
+        dlg.setMinimumSize(720, 480)
+
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea(dlg)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(content)
+        lay.addWidget(scroll)
+        return dlg
 
     # ── Quiz Section ──────────────────────────────────────────────────────────
     def _build_quiz_section(self):
-        # Outer widget — NO scroll wrapper; fills panel naturally via splitter
+        # Outer widget — scrolling is provided by the dialog that now houses this section
         w = QWidget()
         root = QVBoxLayout(w)
         root.setContentsMargins(20, 14, 20, 14)

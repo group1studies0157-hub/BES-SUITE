@@ -2,20 +2,21 @@
 # Install: pip install -r requirements.txt
 
 # ── GUI ──────────────────────────────────────────────────────────────────────
-PyQt6>=6.5.0
+PyQt6>=6.6.0
 
 # ── Computer Vision (geometry detection) — local, free ───────────────────────
 opencv-python-headless>=4.8.0
 numpy>=1.24.0
 
 # ── CAD file output — open source ────────────────────────────────────────────
-ezdxf>=1.1.0
+ezdxf>=1.4.0
 
 # ── Image handling ────────────────────────────────────────────────────────────
 Pillow>=10.0.0
 
 # ── PDF support ───────────────────────────────────────────────────────────────
-PyMuPDF>=1.23.0
+PyMuPDF>=1.28.0
+pdfplumber>=0.11.0       # Bore-log PDF table extraction
 
 # ── AI Vision — Claude (primary OCR + shape recognition) ─────────────────────
 anthropic>=0.25.0
@@ -29,3 +30,18 @@ google-generativeai>=0.8.0
 # ── Local OCR fallback (free, offline, optional) ──────────────────────────────
 pytesseract>=0.3.10
 # Requires Tesseract binary: https://github.com/UB-Mannheim/tesseract/wiki (Windows)
+
+# ── Bore-log Excel parsing ───────────────────────────────────────────────────
+xlrd>=2.0.1              # .xls reading (legacy Excel format)
+openpyxl>=3.1.0          # .xlsx reading
+
+# ── DXF repair pipeline (GAD Generator → DXF Repair tab) ─────────────────────
+matplotlib>=3.8.0        # optional: higher-fidelity render for validation diffs
+scikit-learn>=1.3.0      # optional: DBSCAN clustering fallback (greedy used otherwise)
+
+
+# ── Google Sheets sync — service account, no browser login (core/sheets_sync.py)
+gspread>=6.0.0
+google-auth>=2.30.0
+# Reads the service-account key from secrets/bes_service_account.json
+# (or the BES_SHEETS_CREDENTIALS env var). See core/sheets_sync.py for setup.
