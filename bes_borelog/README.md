@@ -1,4 +1,8 @@
-# BES Bore-Log \u2192 DXF
+# BES Bore-Log → DXF
+
+> **Note:** this tool is now part of the **Bridge Engineering Suite**
+> repository (merged under `bes_borelog/`). The standalone
+> `bes_borelog` Git repository is retired; see the root `README.md`.
 
 Converts bore-log reports (SPT/RQD stratigraphy sheets, "one borehole per
 sheet/page" style, as used in South Central Railway / geotech consultant

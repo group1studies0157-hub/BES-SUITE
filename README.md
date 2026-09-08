@@ -1,6 +1,6 @@
 # Bridge Engineering Suite v2.0
 
-A local-first desktop application for bridge/civil engineering workflows — CD processing, AI-powered AutoCAD generation from scanned drawings, GAD checking, hydraulic calculations, and a study knowledge base. Built with Python + PyQt6.
+A local-first desktop application for bridge/civil engineering workflows — CD processing, AI-powered AutoCAD generation from scanned drawings, GAD checking, hydraulic calculations, bore-log conversion (Excel/PDF → DXF), and a study knowledge base. Built with Python + PyQt6.
 
 ---
 
@@ -22,18 +22,21 @@ Either script creates a virtual environment, installs dependencies from `require
 
 ## Panels
 
-The app is a sidebar shell with seven pages:
+The app is a sidebar shell with eleven pages:
 
 | # | Panel | Purpose |
 |---|-------|---------|
-| 0 | **CD Processing** | Enter bridge numbers, pick a mode (Full CD / Drawings / Quantities / Specs / Cross-Ref), run the pipeline with live progress and run history. |
-| 1 | **CAD Process** | Upload an image/PDF drawing → AI (or OpenCV fallback) detects geometry, dimensions, text, hatching → outputs an AutoLISP script + editable DXF. |
-| 2 | **CAD Process 2** | Second-generation CAD extraction workflow. |
-| 3 | **GAD Generator** | **Prompt + dimensions → parametric GAD.** Describe the bridge (spans, RL/FL/BL/HFL, span type), get a draft General Arrangement Drawing as AutoLISP + DXF. |
-| 4 | **GAD Checking** | General Arrangement Drawing verification. |
-| 5 | **Hydraulic Calculations** | Hydraulic computations with OCR-assisted parameter extraction. |
-| 6 | **Knowledge Base** | Study/reference tools. |
-| 7 | **Settings** | Theme (dark/light) and API keys. |
+| 0 | **Home** | Dashboard launcher — tool cards, recent projects, quick links, system status. |
+| 1 | **CD Processing** | Enter bridge numbers, pick a mode (Full CD / Drawings / Quantities / Specs / Cross-Ref), run the pipeline with live progress and run history. |
+| 2 | **CAD Process** | Upload an image/PDF drawing → AI (or OpenCV fallback) detects geometry, dimensions, text, hatching → outputs an AutoLISP script + editable DXF. |
+| 3 | **CAD Process 2** | Second-generation CAD extraction workflow. |
+| 4 | **GAD Generator** | **Prompt + dimensions → parametric GAD.** Describe the bridge (spans, RL/FL/BL/HFL, span type), get a draft General Arrangement Drawing as AutoLISP + DXF. |
+| 5 | **GAD Checking** | General Arrangement Drawing verification. |
+| 6 | **Hydraulic Calculations** | Hydraulic computations with OCR-assisted parameter extraction. |
+| 7 | **Bore Log** | Convert bore-log reports (Excel/PDF) into BORE HOLE DETAILS DXF drawings — see *Bore Log → DXF* below. |
+| 8 | **Knowledge Base** | Study/reference tools. |
+| 9 | **Sheets Sync** | Pull live project tracking data from Google Sheets. |
+| 10 | **Settings** | Theme (dark/light) and API keys. |
 
 ---
 
@@ -140,6 +143,36 @@ python generate_gad.py "2x9.15 m PSC slab at CH 52.300, RL 112.25, FL 111.15, BL
 
 ---
 
+## Bore Log → DXF (`bes_borelog/`)
+
+The bore-log converter now lives **inside this repository** under
+`bes_borelog/borelog_dxf/`. It was subtree-merged from its former
+standalone repo (`bes_borelog` is no longer a separate Git repository or
+submodule), so the tool and the suite are versioned together.
+
+It converts bore-log reports (SPT/RQD stratigraphy sheets, "one borehole
+per sheet/page") from **Excel (.xls/.xlsx)** or **PDF** into an AutoCAD
+**DXF** "BORE HOLE DETAILS (NOT TO SCALE)" drawing — hatched soil/rock
+columns, SPT-N / RQD annotations, depth ticks, termination markers and a
+legend.
+
+Ways to use it:
+
+- **In the app:** open the **Bore Log** panel — `gui/borelog_panel.py`
+  wraps `borelog_dxf` (parsers → shared model → DXF builder).
+- **Standalone GUI:** from `bes_borelog/`, run `python -m borelog_dxf.gui`
+  (or double-click `bes_borelog/Run_BoreLog_Tool.bat`, which manages its
+  own `.venv`).
+- **CLI / batch:** from `bes_borelog/`, run
+  `python -m borelog_dxf.cli report.xls -o output.dxf` (drag-drop:
+  `Convert_DragDrop.bat`).
+
+Its dependencies (xlrd, openpyxl, pdfplumber, PyMuPDF, ezdxf,
+pytesseract) are already in the root `requirements.txt` — no extra
+install step. Full docs: `bes_borelog/README.md`.
+
+---
+
 ## Project Structure
 
 ```
@@ -158,8 +191,11 @@ BES/
 │  ├─ cad_panel2.py        Panel 2
 │  ├─ gad_panel.py         Panel 3
 │  ├─ hydraulic_panel.py   Panel 4  (+ hydraulic_ocr.py)
+│  ├─ borelog_panel.py     Panel 7 — wraps bes_borelog/borelog_dxf
 │  ├─ knowledge_panel.py   Panel 5
 │  └─ files/               param_extractor, vc_lookup, ...
+├─ bes_borelog/            Bore-log → DXF tool, merged into this repo
+│  └─ borelog_dxf/         parsers (xls/pdf) → model → DXF builder + GUI/CLI
 └─ Database/               Reference PDFs
 ```
 
