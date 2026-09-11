@@ -17,9 +17,10 @@ from PyQt6.QtCore import (
     QSize,
     QTimer,
     Qt,
+    QUrl,
     pyqtSignal,
 )
-from PyQt6.QtGui import QColor, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtGui import QColor, QDesktopServices, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -46,6 +47,7 @@ install_text_sanitizer()
 
 from gui.styles import COLORS, THEME_NAMES, THEME_SWATCHES, apply_theme, current_theme, status_label
 from gui.icons import icon_label, icon_path as get_icon_path, pixmap as icon_pixmap, tile_pixmap
+from gui.calculated_notes_panel import CalculatedNotesPanel
 from gui.cd_panel import CDPanel
 from gui.cad_panel import CADPanel
 from gui.cad_panel2 import CAD2Panel
@@ -74,6 +76,31 @@ def _reduced_motion() -> bool:
 
 _ANIM_FAST = 130
 _ANIM_PAGE = 190
+
+
+def _restore_hydraulic_inputs(form, saved: dict) -> None:
+    """Best-effort restore of Hydraulic Calcs form values across a theme-driven
+    panel rebuild. Field names differ between the New Line and Doubling forms,
+    so only set keys the target form actually knows about."""
+    if not saved:
+        return
+    try:
+        for key, value in saved.items():
+            field = getattr(form, key, None)
+            if field is None:
+                continue
+            if hasattr(field, "setText"):
+                field.setText(str(value))
+            elif hasattr(field, "setCurrentText"):
+                field.setCurrentText(str(value))
+        # Recompute any auto-derived helpers after the bulk restore.
+        if hasattr(form, "_update_span_descs"):
+            form._update_span_descs()
+        if hasattr(form, "_recalc_tc_ratio"):
+            form._tc_ratio_user_edited = False
+            form._recalc_tc_ratio()
+    except Exception:
+        pass
 
 
 class SidebarButton(QPushButton):
@@ -194,7 +221,9 @@ class BridgeLogo(QFrame):
     def _paint_content(self, painter: QPainter):
         s = self._size
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#FFFFFF"), max(1.5, s * 0.045))
+        # Draw in the theme's primary text color so the mark stays visible on
+        # both dark (graphite) and light sidebars.
+        pen = QPen(QColor(COLORS.get("text_primary", "#16283C")), max(1.5, s * 0.045))
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -218,11 +247,11 @@ class BridgeLogo(QFrame):
 
 
 class HeroBanner(QFrame):
-    """Hero with a painted 'bridge over river' photo scene and overlaid copy.
+    """Hero with a photo scene (rail arch bridge) and overlaid copy.
 
-    The scene is a cached Pillow render (gui/assets/hero_bridge.png); it is
-    drawn scaled+cropped in paintEvent, with a left-to-right sky wash and a
-    bottom feature strip so white text stays readable (mock: 01_home).
+    The scene is gui/assets/icons/bridge.png; it is drawn scaled+cropped
+    (cover-fit) in paintEvent, with a left-to-right sky wash and a bottom
+    feature strip so white text stays readable (mock: 01_home).
     """
 
     def __init__(self, parent=None):
@@ -234,7 +263,7 @@ class HeroBanner(QFrame):
     @staticmethod
     def _load_photo() -> QPixmap | None:
         path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "assets", "hero_bridge.png"
+            os.path.dirname(os.path.abspath(__file__)), "assets", "icons", "bridge.png"
         )
         pm = QPixmap(path) if os.path.isfile(path) else QPixmap()
         return pm if not pm.isNull() else None
@@ -264,12 +293,14 @@ class HeroBanner(QFrame):
         painter.setClipPath(path)
 
         if self._photo is not None:
-            # cover-fit: scale to fill, crop the sides
+            # cover-fit: scale to fill, crop the sides; bias crop toward the
+            # top so the bridge arches stay visible in the wide, short hero.
             pm = self._photo
             scale = max(w / pm.width(), h / pm.height())
             tw, th = pm.width() * scale, pm.height() * scale
+            off_y = min((h - th) / 2, 0.0) * 0.45  # keep ~45% of the excess crop above
             painter.drawPixmap(
-                QRectF((w - tw) / 2, (h - th) / 2, tw, th), pm,
+                QRectF((w - tw) / 2, off_y, tw, th), pm,
                 QRectF(0, 0, pm.width(), pm.height()),
             )
         else:
@@ -590,9 +621,13 @@ class SettingsPanel(QWidget):
     def _set_theme(self, theme: str):
         apply_theme(theme, QApplication.instance())
         self._refresh_ui()
-        self._win._sync_top_bar()
-        if hasattr(self._win, "knowledge_panel"):
-            panel = self._win.knowledge_panel
+        win = self._win
+        win._sync_top_bar()
+        # Rebuild content panels so construction-time inline styles pick up
+        # the new theme's font colors proportionally.
+        win._rebuild_themed_panels()
+        if hasattr(win, "knowledge_panel"):
+            panel = win.knowledge_panel
             if hasattr(panel, "_sync_theme"):
                 panel._sync_theme()
 
@@ -771,6 +806,7 @@ class HomePanel(QWidget):
         ql.setContentsMargins(16, 12, 16, 12)
         ql.setSpacing(10)
         qmark = QLabel("“")
+        # light-blue mark on the dark glass quote card (card bg is theme-independent)
         qmark.setStyleSheet("color:#BFDBFE;font-size:34px;font-weight:800;background:transparent;")
         ql.addWidget(qmark)
         qtitle = QLabel("Stronger Infrastructure for a Connected Tomorrow")
@@ -943,7 +979,6 @@ class HomePanel(QWidget):
     _REFERENCE_SPECS = [
         ("kb", "Knowledge Base", "Search manuals, codes and practice exam questions.", 8, "book", "#7C3AED", True),
         ("sync", "Sheets Sync", "Pull live project tracking data from Google Sheets.", 9, "plan", "#1668C7", False),
-        ("settings", "Settings", "Theme, local credentials, and app details.", 10, "plan", "#334155", False),
     ]
 
     def _workflow_cards(self) -> list[QFrame]:
@@ -1235,11 +1270,18 @@ class HomePanel(QWidget):
         head.addWidget(btn)
         lay.addLayout(head)
 
-        links = ["IRC Codes & Standards", "RDSO Drawings", "Indian Railways Manual", "MoRTH Standards"]
-        for name in links:
+        links = [
+            ("IR Codes & Manuals", "https://www.iricen.gov.in/iricen/CodeManualNew.jsp"),
+            ("RDSO Drawings", "http://10.100.2.4/index.aspx"),
+            ("E.DAS - 2.0", "https://edas.rcil.gov.in/"),
+            ("RRB Secunderabad", "https://rrbsecunderabad.gov.in/"),
+            ("Indian Railways Codes & Manuals", "https://indianrailways.gov.in/railwayboard/view_section.jsp?lang=0&id=0%2C5%2C377"),
+        ]
+        for name, url in links:
             row = QFrame()
             row.setObjectName("quickLinkRow")
             row.setCursor(Qt.CursorShape.PointingHandCursor)
+            row.setToolTip(url)
             rl = QHBoxLayout(row)
             rl.setContentsMargins(0, 9, 8, 9)
             rl.setSpacing(8)
@@ -1251,7 +1293,7 @@ class HomePanel(QWidget):
             glyph.setFixedSize(14, 14)
             glyph.setScaledContents(True)
             rl.addWidget(glyph)
-            row.mouseReleaseEvent = lambda ev, nm=name: self._win._open_quick_link(nm)
+            row.mouseReleaseEvent = lambda ev, u=url: self._win._open_quick_link(u)
             lay.addWidget(row)
         lay.addStretch()
         return card
@@ -1376,7 +1418,7 @@ class MainWindow(QMainWindow):
         self.move(avail.center().x() - w // 2, avail.center().y() - h // 2)
 
         self._sidebar_expanded_w = 220
-        self._sidebar_collapsed_w = 56
+        self._sidebar_collapsed_w = 64
         self._sidebar_pinned = QSettings("BES", "BridgeEngineeringSuite").value(
             "sidebar_pinned", True, type=bool
         )
@@ -1418,6 +1460,7 @@ class MainWindow(QMainWindow):
         self.hydraulic_panel = HydraulicPanel()
         self.knowledge_panel = KnowledgePanel()
         self.borelog_panel = BoreLogPanel()
+        self.calculated_notes_panel = CalculatedNotesPanel()
         self.sheets_sync_panel = SheetsSyncPanel()
         self.settings_panel = SettingsPanel(self)
 
@@ -1431,13 +1474,80 @@ class MainWindow(QMainWindow):
             self.hydraulic_panel,
             self.borelog_panel,
             self.knowledge_panel,
-            self.sheets_sync_panel,
-            self.settings_panel,
+            self.calculated_notes_panel,  # page 9  (sidebar: after Bore Log)
+            self.sheets_sync_panel,       # page 10
+            self.settings_panel,          # page 11
         ):
             self.stack.addWidget(panel)
 
         root.addWidget(content_shell, 1)
         self._switch(0)
+
+    # -- Theme re-skin -----------------------------------------------------
+    # Panels bake COLORS[...] into inline QSS at construction time, so a
+    # runtime theme switch left them with the old font colors. Rather than
+    # chase every inline style, rebuild the panels once on switch — cheap
+    # (a few hundred ms), fully correct, and it preserves form values in the
+    # Hydraulic Calcs forms via _swap_panel.
+
+    def _rebuild_themed_panels(self):
+        """Recreate content panels so inline styles pick up the new theme."""
+        current = self.stack.currentIndex()
+        swaps = (
+            (0, "home_panel", lambda: HomePanel(self)),
+            (1, "cd_panel", CDPanel),
+            (2, "cad_panel", CADPanel),
+            (3, "cad2_panel", CAD2Panel),
+            (4, "gadgen_panel", GadGeneratorPanel),
+            (5, "gad_panel", GADPanel),
+            (6, "hydraulic_panel", HydraulicPanel),
+            (8, "knowledge_panel", KnowledgePanel),
+            (9, "calculated_notes_panel", CalculatedNotesPanel),
+            (11, "settings_panel", lambda: SettingsPanel(self)),
+        )
+        for index, attr, factory in swaps:
+            self._swap_panel(index, attr, factory())
+        # BoreLog (7) and Sheets Sync (10) follow the global QSS closely enough
+        # not to need a rebuild; skip them to keep their session state.
+        # Calculated Notes (9) IS rebuilt (theme-baked styles) but carries its
+        # session notes across via export/restore.
+        self.stack.setCurrentIndex(current)
+        self._sync_top_bar()
+
+    def _swap_panel(self, index: int, attr: str, new_panel: QWidget):
+        """Replace the panel at `index`, copying `attr` onto self and
+        transferring form values from the old Hydraulic panel if needed."""
+        old = self.stack.widget(index)
+        old_was_hydraulic = old is self.hydraulic_panel
+        old_inputs = None
+        if old_was_hydraulic:
+            try:
+                form = (self.hydraulic_panel._form_newline
+                        if self.hydraulic_panel._mode == "1"
+                        else self.hydraulic_panel._form_doubling)
+                if form is not None:
+                    old_inputs = form.get_inputs()
+            except Exception:
+                old_inputs = None
+
+        self.stack.removeWidget(old)
+        old.deleteLater()
+        self.stack.insertWidget(index, new_panel)
+        setattr(self, attr, new_panel)
+
+        if old_was_hydraulic and old_inputs:
+            new_form = (new_panel._form_newline if new_panel._mode == "1"
+                        else new_panel._form_doubling)
+            if new_form is not None:
+                _restore_hydraulic_inputs(new_form, old_inputs)
+
+        # Preserve Calculated Notes session entries across themed rebuilds.
+        if attr == "calculated_notes_panel" and isinstance(old, CalculatedNotesPanel) \
+                and isinstance(new_panel, CalculatedNotesPanel):
+            try:
+                new_panel.restore_entries(old.export_entries())
+            except Exception:
+                pass
 
     def _build_footer_bar(self) -> QFrame:
         """Bottom status strip: version, all-systems status, tagline (no 'AI')."""
@@ -1484,20 +1594,29 @@ class MainWindow(QMainWindow):
         brand = QFrame()
         brand.setObjectName("brandCard")
         brand_lay = QHBoxLayout(brand)
-        brand_lay.setContentsMargins(10, 10, 10, 10)
-        brand_lay.setSpacing(8)
+        # Slim margins + tight spacing give the text column every pixel of the
+        # 220px sidebar so "Bridge Engineering Suite" and the tagline render
+        # in full instead of clipping.
+        brand_lay.setContentsMargins(8, 8, 6, 8)
+        brand_lay.setSpacing(6)
 
-        mark = BridgeLogo(42)
+        mark = BridgeLogo(34)
+        self._brand_mark = mark
         brand_lay.addWidget(mark)
 
         brand_text = QVBoxLayout()
-        brand_text.setSpacing(1)
+        brand_text.setContentsMargins(0, 0, 0, 0)
+        brand_text.setSpacing(2)
         logo = QLabel("BES")
         logo.setObjectName("logoLabel")
         subtitle = QLabel("Bridge Engineering Suite")
         subtitle.setObjectName("subLabel")
-        tagline = QLabel("Design - Analyse - Draft - Deliver")
+        tagline = QLabel("Design · Analyse\nDraft · Deliver")
         tagline.setObjectName("sideTagline")
+        # Explicit two-line break keeps the tagline balanced; wordWrap is a
+        # safety net if the column ever gets narrower than either line.
+        tagline.setWordWrap(True)
+        tagline.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         brand_text.addWidget(logo)
         brand_text.addWidget(subtitle)
         brand_text.addWidget(tagline)
@@ -1509,11 +1628,13 @@ class MainWindow(QMainWindow):
 
         self.btn_pin = QPushButton("<<")
         self.btn_pin.setObjectName("pinButton")
-        self.btn_pin.setFixedSize(22, 22)
+        self.btn_pin.setFixedSize(20, 20)
         self.btn_pin.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_pin.clicked.connect(self._toggle_pin)
         brand_lay.addWidget(self.btn_pin)
 
+        self._brand_card = brand
+        self._brand_lay = brand_lay
         layout.addWidget(brand)
 
         self.btn_home = SidebarButton("Home", icon_key="home")
@@ -1548,13 +1669,16 @@ class MainWindow(QMainWindow):
         self.btn_gad = SidebarButton("GAD Checking", icon_key="gad")
         self.btn_hydro = SidebarButton("Hydraulic Calcs", icon_key="hydraulic")
         self.btn_borelog = SidebarButton("Bore Log", icon_key="borelog")
+        self.btn_calcnotes = SidebarButton("Calculated Notes", icon_key="calcnotes")
 
         self.btn_gad.clicked.connect(lambda: self._switch(5))
         self.btn_hydro.clicked.connect(lambda: self._switch(6))
         self.btn_borelog.clicked.connect(lambda: self._switch(7))
+        self.btn_calcnotes.clicked.connect(lambda: self._switch(9))
 
-        self._sidebar_buttons += [self.btn_gad, self.btn_hydro, self.btn_borelog]
-        for btn in (self.btn_gad, self.btn_hydro, self.btn_borelog):
+        self._sidebar_buttons += [self.btn_gad, self.btn_hydro, self.btn_borelog,
+                                  self.btn_calcnotes]
+        for btn in (self.btn_gad, self.btn_hydro, self.btn_borelog, self.btn_calcnotes):
             layout.addWidget(btn)
 
         layout.addSpacing(8)
@@ -1568,7 +1692,7 @@ class MainWindow(QMainWindow):
         self._sidebar_buttons.append(self.btn_kb)
 
         self.btn_sheets = SidebarButton("Sheets Sync", icon_key="import")
-        self.btn_sheets.clicked.connect(lambda: self._switch(9))
+        self.btn_sheets.clicked.connect(lambda: self._switch(10))
         layout.addWidget(self.btn_sheets)
         self._sidebar_buttons.append(self.btn_sheets)
 
@@ -1586,16 +1710,11 @@ class MainWindow(QMainWindow):
 
         self.btn_project = SidebarButton("Project Manager", icon_key="folder")
         self.btn_project.setCheckable(False)
-        self.btn_project.clicked.connect(lambda: self._switch(9))
+        self.btn_project.clicked.connect(lambda: self._switch(10))
         layout.addWidget(self.btn_project)
         self._sidebar_buttons.append(self.btn_project)
 
         layout.addSpacing(6)
-        self.btn_settings = SidebarButton("Settings", obj_name="settingsBtn", icon_key="settings")
-        self.btn_settings.clicked.connect(lambda: self._switch(10))
-        layout.addWidget(self.btn_settings)
-        self._sidebar_buttons.append(self.btn_settings)
-
         self.btn_help = SidebarButton("Help & Support", obj_name="settingsBtn", icon_key="info")
         self.btn_help.clicked.connect(self._open_help)
         layout.addWidget(self.btn_help)
@@ -1629,8 +1748,23 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._side_status_row)
 
         collapsed = not self._sidebar_pinned
+        self._apply_sidebar_collapse(collapsed)
+
+        return sidebar
+
+    def _apply_sidebar_collapse(self, collapsed: bool):
+        """Apply collapsed/expanded state to the sidebar chrome.
+
+        The pin toggle stays visible in BOTH states — it is the only control
+        that can bring the process names back after a collapse, so hiding it
+        used to strand the sidebar as a bare icon rail forever.
+        """
         self._brand_text_wrap.setVisible(not collapsed)
-        self.btn_pin.setVisible(not collapsed)
+        self._brand_mark.setVisible(not collapsed)
+        # Tighten the brand card so the lone pin button fits the narrow rail.
+        self._brand_lay.setContentsMargins(4, 4, 4, 4) if collapsed else \
+            self._brand_lay.setContentsMargins(8, 8, 6, 8)
+        self.btn_pin.setVisible(True)
         self.btn_pin.setText(">>" if collapsed else "<<")
         self.btn_pin.setToolTip("Expand sidebar" if collapsed else "Collapse sidebar")
         self.nav_label_drawings.setVisible(not collapsed)
@@ -1642,8 +1776,6 @@ class MainWindow(QMainWindow):
         self._side_status_row.setVisible(not collapsed)
         for btn in self._sidebar_buttons:
             btn.setCollapsed(collapsed)
-
-        return sidebar
 
     def _open_help(self):
         """Open a compact Help & Support summary (same content as Settings > About)."""
@@ -1669,22 +1801,10 @@ class MainWindow(QMainWindow):
         self._set_sidebar_width(
             self._sidebar_collapsed_w if collapsed else self._sidebar_expanded_w, animate=True
         )
-        self._set_sidebar_labels_visible(not collapsed)
-        self.btn_pin.setText(">>" if collapsed else "<<")
-        self.btn_pin.setToolTip("Expand sidebar" if collapsed else "Collapse sidebar")
-        for btn in self._sidebar_buttons:
-            btn.setCollapsed(collapsed)
+        self._apply_sidebar_collapse(collapsed)
 
     def _set_sidebar_labels_visible(self, visible: bool):
-        self._brand_text_wrap.setVisible(visible)
-        self.btn_pin.setVisible(visible)
-        self.nav_label_drawings.setVisible(visible)
-        self.nav_label_checks.setVisible(visible)
-        self.nav_label_reference.setVisible(visible)
-        self.nav_label_projects.setVisible(visible)
-        self.version_label.setVisible(visible)
-        self._side_promo.setVisible(visible)
-        self._side_status_row.setVisible(visible)
+        self._apply_sidebar_collapse(not visible)
 
     def _set_sidebar_width(self, target: int, animate: bool):
         if not animate or _reduced_motion():
@@ -1706,27 +1826,35 @@ class MainWindow(QMainWindow):
     def _build_top_bar(self) -> QFrame:
         bar = QFrame()
         bar.setObjectName("topBar")
-        bar.setFixedHeight(62)
+        # 66px carries 34px-tall controls plus breathing room; 62px with the
+        # old margins left ~21px of usable height, which crushed the Hydraulic
+        # Calcs mode dropdown and Smart Extract controls into a squeezed strip.
+        bar.setFixedHeight(66)
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(18, 10, 18, 10)
-        layout.setSpacing(12)
+        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setSpacing(10)
 
         # Tagline strip on the left (mock: SAFE BRIDGES | SMARTER ENGINEERING | ...)
+        # Decorative — hidden whenever a panel contributes top-bar controls so
+        # the Hydraulic Calcs dropdown/Smart Extract row never gets squeezed.
         tagline = QLabel()
         tagline.setObjectName("topTagline")
         tagline.setText("SAFE BRIDGES   |   SMARTER ENGINEERING   |   BRIGHTER TOMORROW")
         layout.addWidget(tagline)
+        self._tagline_label = tagline
 
         # Slot for panel-specific controls (e.g. Hydraulic Calcs' mode
         # dropdown + Smart Extract hint) rendered right next to the tagline
         # instead of duplicating a second title row inside the panel.
+        # Stretch 1 + expanding height so panel controls are never squeezed:
+        # the tagline and search yield leftover space to them instead.
         self.top_bar_extra_container = QFrame()
         self.top_bar_extra_container.setObjectName("topBarExtra")
         self.top_bar_extra_container.setVisible(False)
         self._top_bar_extra_layout = QHBoxLayout(self.top_bar_extra_container)
-        self._top_bar_extra_layout.setContentsMargins(0, 0, 0, 0)
+        self._top_bar_extra_layout.setContentsMargins(8, 0, 8, 0)
         self._top_bar_extra_layout.setSpacing(10)
-        layout.addWidget(self.top_bar_extra_container)
+        layout.addWidget(self.top_bar_extra_container, 1)
 
         layout.addStretch()
 
@@ -1741,6 +1869,7 @@ class MainWindow(QMainWindow):
         hint = QLabel("Ctrl + K")
         hint.setObjectName("searchHint")
         layout.addWidget(hint)
+        self._search_hint = hint
 
         # Notification bell
         self.btn_bell = QPushButton()
@@ -1762,7 +1891,7 @@ class MainWindow(QMainWindow):
         self.btn_top_settings.setIcon(QIcon(icon_pixmap("gear", COLORS.get("text_secondary", "#C7D2E0"), 16)))
         self.btn_top_settings.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_top_settings.setToolTip("Settings")
-        self.btn_top_settings.clicked.connect(lambda: self._switch(10))
+        self.btn_top_settings.clicked.connect(lambda: self._switch(11))
         layout.addWidget(self.btn_top_settings)
 
         # Profile chip
@@ -1815,8 +1944,9 @@ class MainWindow(QMainWindow):
             ("gad generator", 4), ("gad", 5), ("check", 5),
             ("hydraulic", 6), ("bore", 7),
             ("knowledge", 8), ("manual", 8), ("quiz", 8),
-            ("sheet", 9), ("sync", 9), ("track", 9),
-            ("setting", 10), ("theme", 10), ("key", 10), ("api", 10),
+            ("sheet", 10), ("sync", 10), ("track", 10),
+            ("setting", 11), ("theme", 11), ("key", 11), ("api", 11),
+            ("calculator", 9), ("calculated", 9), ("notes", 9),
             ("home", 0),
         ]
         for needle, index in routes:
@@ -1839,16 +1969,14 @@ class MainWindow(QMainWindow):
         menu.addAction("Profile — Manoj Steve")
         menu.addAction("Workspace — Local Build")
         menu.addSeparator()
-        act_settings = menu.addAction("Settings")
-        act_settings.triggered.connect(lambda: self._switch(10))
         act_home = menu.addAction("Home")
         act_home.triggered.connect(lambda: self._switch(0))
         menu.exec(self._profile_chip.mapToGlobal(
             self._profile_chip.rect().bottomLeft()))
 
-    def _open_quick_link(self, name: str):
-        """Quick Links rail: open the reference panel that hosts the item."""
-        self._switch(8)
+    def _open_quick_link(self, url: str):
+        """Quick Links rail: open the reference site in the local browser."""
+        QDesktopServices.openUrl(QUrl(url))
 
     def _sync_top_bar(self):
         # The redesigned top bar is a global strip (tagline + search + profile);
@@ -1873,6 +2001,12 @@ class MainWindow(QMainWindow):
         if widget is not None:
             layout.addWidget(widget)
         self.top_bar_extra_container.setVisible(widget is not None)
+        # Panel controls take over the tagline's strip — the tagline is
+        # decorative, the mode dropdown must stay readable.
+        self._tagline_label.setVisible(widget is None)
+        # Slim the global chrome to hand even more width to the panel row.
+        self.global_search.setFixedWidth(240 if widget is None else 170)
+        self._search_hint.setVisible(widget is None)
 
     def _switch(self, index: int):
         changed = hasattr(self, "stack") and index != self.stack.currentIndex()
@@ -1887,8 +2021,8 @@ class MainWindow(QMainWindow):
         self.btn_hydro.setChecked(index == 6)
         self.btn_borelog.setChecked(index == 7)
         self.btn_kb.setChecked(index == 8)
-        self.btn_sheets.setChecked(index == 9)
-        self.btn_settings.setChecked(index == 10)
+        self.btn_sheets.setChecked(index == 10)
+        self.btn_calcnotes.setChecked(index == 9)
 
         self._sync_top_bar()
         if changed:

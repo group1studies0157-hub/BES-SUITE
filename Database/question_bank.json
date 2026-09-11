@@ -401,7 +401,7 @@
         "explanation": "The minimum sleeper density for BG main line track is 1818 No./km (M+7 spacing) as per IRPWM specifications.",
         "difficulty": "hard",
         "source": "IRPWM — Sleeper Density",
-        "attempt_count": 1
+        "attempt_count": 2
       },
       {
         "question": "Creep of rails is caused by ___",
@@ -719,7 +719,7 @@
         "question": "As per the Bridge Rules, which section deals with 'Forces due to curvature and eccentricity of track'?",
         "source": "Bridge Rules Contents, Section 2.5",
         "topic": "IRPWM",
-        "attempt_count": 1
+        "attempt_count": 2
       },
       {
         "correct": 2,
@@ -737,7 +737,7 @@
         "question": "Appendix-I of the Bridge Rules primarily details loading for which gauge?",
         "source": "Bridge Rules Appendix-I",
         "topic": "IRPWM",
-        "attempt_count": 1
+        "attempt_count": 2
       },
       {
         "correct": 1,
@@ -826,7 +826,8 @@
         "pyq_year": null,
         "question": "As per the Bridge Rules (in SI Units) issued by the Ministry of Railways, in which year were these rules first adopted?",
         "source": "Bridge Rules (in SI Units), Title Page",
-        "topic": "IRPWM"
+        "topic": "IRPWM",
+        "attempt_count": 1
       },
       {
         "correct": 3,
@@ -843,7 +844,8 @@
         "pyq_year": null,
         "question": "Which of the following is NOT explicitly listed as a primary load or effect to be taken into account for bridge design in the main contents of the Bridge Rules?",
         "source": "Bridge Rules (in SI Units), Contents Sl. No. 2.1 - 2.15",
-        "topic": "IRPWM"
+        "topic": "IRPWM",
+        "attempt_count": 1
       },
       {
         "correct": 2,
@@ -860,7 +862,8 @@
         "pyq_year": null,
         "question": "What is the primary purpose of the 'Coefficient of Dynamic Augment (CDA)' as referred to in the Bridge Rules for bridge design?",
         "source": "Bridge Rules (in SI Units), Appendix-III",
-        "topic": "IRPWM"
+        "topic": "IRPWM",
+        "attempt_count": 1
       },
       {
         "correct": 1,
@@ -877,7 +880,8 @@
         "pyq_year": null,
         "question": "The First Revision of the Bridge Rules (in SI Units) was implemented in which year?",
         "source": "Bridge Rules (in SI Units), Title Page",
-        "topic": "IRPWM"
+        "topic": "IRPWM",
+        "attempt_count": 1
       },
       {
         "correct": 2,
@@ -894,7 +898,8 @@
         "pyq_year": null,
         "question": "According to the Bridge Rules, for which main components do these rules specify the loads for design?",
         "source": "Bridge Rules (in SI Units), Title Page",
-        "topic": "IRPWM"
+        "topic": "IRPWM",
+        "attempt_count": 1
       },
       {
         "correct": 2,
@@ -911,7 +916,8 @@
         "pyq_year": null,
         "question": "Appendix-XI (Sheets 1 & 2) of the Bridge Rules provides loading diagrams for which specific Broad Gauge loading standard?",
         "source": "Bridge Rules (in SI Units), Appendix-XI",
-        "topic": "IRPWM"
+        "topic": "IRPWM",
+        "attempt_count": 1
       },
       {
         "correct": 2,
@@ -928,6 +934,58 @@
         "pyq_year": null,
         "question": "Which specific force is addressed in the Bridge Rules to account for the resistance encountered at expansion bearings?",
         "source": "Bridge Rules (in SI Units), Contents Sl. No. 2.7",
+        "topic": "IRPWM",
+        "attempt_count": 1
+      },
+      {
+        "correct": 1,
+        "created": "2026-09-10",
+        "difficulty": "easy",
+        "explanation": "As per the title and introductory text, the rules specify loads for design of super-structure and sub-structure of bridges and for assessment of the strength of existing bridges.",
+        "options": [
+          "To specify track maintenance standards for bridges.",
+          "To define loads for the design of bridge super-structure and sub-structure.",
+          "To detail the construction methodology for railway bridges.",
+          "To outline the inspection schedule for bridge components."
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "What is the primary purpose of the \"Bridge Rules (In SI Units)\" issued by the Ministry of Railways?",
+        "source": "Bridge Rules (Title page)",
+        "topic": "IRPWM"
+      },
+      {
+        "correct": 2,
+        "created": "2026-09-10",
+        "difficulty": "easy",
+        "explanation": "The document states 'ADOPTED –1941' on its title page.",
+        "options": [
+          "1964",
+          "1989",
+          "1941",
+          "2008"
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "The \"Bridge Rules (In SI Units)\" were first adopted in which year?",
+        "source": "Bridge Rules (Title page)",
+        "topic": "IRPWM"
+      },
+      {
+        "correct": 2,
+        "created": "2026-09-10",
+        "difficulty": "easy",
+        "explanation": "Sections 2.2, 2.3, and 2.11 list Dead load, Live load, and Wind pressure effect respectively. Maintenance staff weight is not a primary design load category.",
+        "options": [
+          "Dead load",
+          "Live load",
+          "Maintenance staff weight",
+          "Wind pressure effect"
+        ],
+        "origin": "ai_gemini→claude",
+        "pyq_year": null,
+        "question": "Which of the following is NOT explicitly listed as a load or effect to be taken into account for bridge design in Section 2 of the Bridge Rules?",
+        "source": "Bridge Rules, Section 2 (Loads)",
         "topic": "IRPWM"
       }
     ],

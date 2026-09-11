@@ -28,6 +28,10 @@ import re
 from dataclasses import dataclass, field, asdict
 from typing import Any, Optional
 
+# BES drawing-standards knowledge pack — sourced from
+# .agents/skills/autocad_drawing_standards.md. GAD Generator only; bore log
+# has its own separate pipeline and never imports this module.
+from core.cad_knowledge import gad_rules_block
 from core.gad_standards import (
     FAMILIES, resolve_defaults, detect_family, nearest_catalog_key,
 )
@@ -319,6 +323,7 @@ class GadInput:
             "'rcc_box', 'psc_slab', 'psc_girder', 'box_girder', 'steel_girder', 'fob' — pick it from "
             "the prompt text (RCC box / PSC slab / PSC girder / box girder / steel girder / foot over "
             "bridge). Convert metric text like '4.25 m' to 4250 mm. If a value is not mentioned, use null."
+            + gad_rules_block()
         )
         try:
             raw = ai.chat(system, text, max_tokens=2000)
@@ -945,9 +950,11 @@ def _lisp_esc(s: str) -> str:
     return str(s).replace("\\", "\\\\").replace('"', '\\"')
 
 
-def write_lisp(ents: list, path: str, bridge_no: str = "") -> None:
+def write_lisp(ents: list, path: str, bridge_no: str = "",
+               command_name: str = "BES-GAD") -> None:
     """Emit AutoLISP that rebuilds the drawing natively in AutoCAD via entmake.
-    Load the file and run (BES-GAD)."""
+    Load the file and run the given command (default BES-GAD)."""
+    cmd = re.sub(r"[^A-Za-z0-9:\-]", "", str(command_name or "BES-GAD"))
     L = []
     a = L.append
     a("; ═══════════════════════════════════════════════════════════════")
@@ -955,7 +962,7 @@ def write_lisp(ents: list, path: str, bridge_no: str = "") -> None:
     a(f"; Bridge No. : {bridge_no}")
     a("; Generated  : parametric template — do not hand-edit geometry")
     a("; Units      : mm at 1:1 — plot at the drawing scale")
-    a("; USAGE      : load this file in AutoCAD, then type: BES-GAD")
+    a(f"; USAGE      : load this file in AutoCAD, then type: {cmd}")
     a("; ═══════════════════════════════════════════════════════════════")
     a("(defun BES-GAD-LAYER (name col /)")
     a('  (if (not (tblsearch "LAYER" name))')
@@ -998,8 +1005,8 @@ def write_lisp(ents: list, path: str, bridge_no: str = "") -> None:
     a("  (princ \"\\nGAD drawn — check layers, then plot at scale.\")")
     a("  (princ)")
     a(")")
-    a("(defun c:BES-GAD () (BES-GAD-DRAW))")
-    a("(princ \"\\nGAD Generator loaded — type BES-GAD to draw.\")")
+    a(f"(defun c:{cmd} () (BES-GAD-DRAW))")
+    a(f'(princ "\\nGAD Generator loaded — type {cmd} to draw.")')
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("\n".join(L) + "\n")
 

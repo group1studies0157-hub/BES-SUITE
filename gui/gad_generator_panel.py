@@ -23,13 +23,47 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
-    QLabel, QLineEdit, QPlainTextEdit, QPushButton, QScrollArea, QTabWidget,
-    QVBoxLayout, QWidget,
+    QHeaderView, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QScrollArea,
+    QSizePolicy, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
+    QWidget,
 )
 
 from core.gad_generator import GadInput, generate
 from gui.styles import COLORS
 from core.gad_standards import SPAN_TYPES
+
+# Phased view builders (one button per view; Elevation is phase 1)
+from core.cell_sheet import GRID_COLS, GRID_ROWS, collect_grid
+from core.gad_elevation import (
+    LEVEL_FIELDS, elevation_from_file, elevation_from_sheet, extract_values_ai,
+)
+
+GAD_VIEWS = [
+    # (key, button label, enabled/active)
+    ("elevation", "Elevation", True),
+    ("plan", "Plan", False),
+    ("section", "Section", False),
+    ("wing_return", "Wing and Return Wall", False),
+    ("square_return", "Square Return", False),
+]
+
+# 10x4 grid — description cells prefilled (keys are (row, col)); the user
+# types each value in the cell to the RIGHT of its label.  Linear Span gets
+# its own label pair on row 1 (cols D/E) so no right-scan crosses labels.
+_GAD_GRID_PREFILL = {
+    (0, 0): "RL:",
+    (0, 3): "Linear Span:",
+    (1, 0): "FL:",
+    (2, 0): "HFL:",
+    (3, 0): "BED LEVEL(BL):",
+}
+
+_GRID_HINT = (
+    "Type values against the prefilled descriptions (levels & span in METRES). "
+    "Cells accept Excel-style formulas — e.g. =B1-0.762, =D1*1000, "
+    "=SUM(B1:B2), =IF(B2>0, B2, B3). Only the computed value against each "
+    "description is used for the drawing."
+)
 
 EXAMPLE_PROMPT = (
     "Bridge No 3KK at CH 17178.982 m, proposed to be extended on downstream side as\n"
@@ -113,10 +147,51 @@ class _GenerateWorker(QThread):
             self.failed.emit(f"{exc}\n{traceback.format_exc(limit=4)}")
 
 
+class _AIExtractWorker(QThread):
+    """AI vision extraction of the five values from an uploaded image/PDF."""
+
+    done = pyqtSignal(dict, list)
+    failed = pyqtSignal(str)
+
+    def __init__(self, path: str, ai, parent=None):
+        super().__init__(parent)
+        self.path = path
+        self.ai = ai
+
+    def run(self):
+        try:
+            vals, warns = extract_values_ai(self.path, self.ai)
+            self.done.emit(vals, warns)
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(f"Extraction failed: {exc}")
+
+
+class _ElevationWorker(QThread):
+    """Phase-1 elevation generation off the UI thread."""
+
+    done = pyqtSignal(dict)
+    failed = pyqtSignal(str)
+
+    def __init__(self, inp, out_dir: str, parent=None):
+        super().__init__(parent)
+        self.inp = inp
+        self.out_dir = out_dir
+
+    def run(self):
+        try:
+            from core.gad_elevation import generate_elevation
+            res = generate_elevation(self.inp, self.out_dir)
+            res["saved"] = True
+            self.done.emit(res)
+        except Exception as exc:  # noqa: BLE001 — surface everything
+            self.failed.emit(f"{exc}\n{traceback.format_exc(limit=4)}")
+
+
 class GadGeneratorPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._worker = None
+        self._elev_worker = None
         self._build_ui()
 
     # ── UI ──────────────────────────────────────────────────────────────────
@@ -277,6 +352,9 @@ class GadGeneratorPanel(QWidget):
         rl.addWidget(self.open_btn)
         layout.addWidget(self.res_card)
 
+        # phased view builders — elevation first, then plan/section/…
+        self._build_views_ui(layout)
+
         layout.addStretch()
 
     def _bold(self, text: str) -> QLabel:
@@ -400,6 +478,265 @@ class GadGeneratorPanel(QWidget):
         super().resizeEvent(event)
         if getattr(self, "zoom_combo", None) and self.zoom_combo.currentText() == "Fit":
             self._apply_zoom()
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Phased view builders — Elevation (phase 1) · Plan · Section ·
+    # Wing & Return Wall · Square Return.  One shared input method:
+    # a 10x4 excel-like grid (formulas allowed) or a file upload.
+    # ═══════════════════════════════════════════════════════════════════
+
+    def _build_views_ui(self, layout: QVBoxLayout):
+        """View-builder buttons + shared 10x4 input grid + upload."""
+        card = QFrame(); card.setObjectName("accentCard")
+        vl = QVBoxLayout(card); vl.setContentsMargins(18, 16, 18, 16)
+        vl.setSpacing(10)
+
+        vl.addWidget(self._bold("View Builders — generate view by view"))
+        note = QLabel(
+            "The GAD is built in parts. All views use the SAME inputs — enter "
+            "them once below. Elevation is active; the rest come online as "
+            "their phases are completed.")
+        note.setObjectName("panelSubtitle"); note.setWordWrap(True)
+        vl.addWidget(note)
+
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        self._view_btns: dict = {}
+        for key, label, active in GAD_VIEWS:
+            b = QPushButton(label)
+            b.setCheckable(True)
+            b.setObjectName("secondaryBtn")
+            b.setFixedHeight(36)
+            b.setToolTip("Coming in a later phase" if not active else
+                         "Phase 1 — draw the elevation from the values below")
+            if active:
+                b.setChecked(True)
+                b.setStyleSheet(
+                    f"QPushButton{{background:{COLORS['accent_bg']};"
+                    f"color:{COLORS['text_primary']};border:1px solid {COLORS['accent']};}}"
+                    f"QPushButton:hover{{border-color:{COLORS['accent_light']};}}")
+            else:
+                b.setStyleSheet(
+                    f"QPushButton{{color:{COLORS['text_muted']};}}")
+            b.clicked.connect(lambda _c, k=key: self._on_view_clicked(k))
+            self._view_btns[key] = (b, active)
+            row.addWidget(b)
+        row.addStretch()
+        vl.addLayout(row)
+
+        # pending-phase message
+        self.view_msg = QLabel("")
+        self.view_msg.setObjectName("tagInfo")
+        self.view_msg.setWordWrap(True)
+        self.view_msg.setVisible(False)
+        vl.addWidget(self.view_msg)
+
+        # ── shared input: 10x4 excel-like grid ───────────────────────────
+        vl.addWidget(self._bold("Inputs (shared by all views)"))
+        gh = QHBoxLayout()
+        gh.addWidget(QLabel("Input method"))
+        self.input_method = QComboBox()
+        self.input_method.addItem("Enter in cells", "grid")
+        self.input_method.addItem("Upload file (Excel / PDF / image)", "file")
+        self.input_method.currentIndexChanged.connect(
+            lambda i: self.upload_btn.setVisible(i == 1))
+        gh.addWidget(self.input_method, 1)
+        self.upload_btn = QPushButton("Choose file…")
+        self.upload_btn.setObjectName("secondaryBtn")
+        self.upload_btn.clicked.connect(self._browse_input_file)
+        self.upload_btn.setVisible(False)
+        gh.addWidget(self.upload_btn)
+        vl.addLayout(gh)
+
+        self.input_stack_hint = QLabel(_GRID_HINT)
+        self.input_stack_hint.setObjectName("panelSubtitle")
+        self.input_stack_hint.setWordWrap(True)
+        vl.addWidget(self.input_stack_hint)
+
+        self.grid = QTableWidget(GRID_ROWS, GRID_COLS)
+        self.grid.setObjectName("gadGrid")
+        self.grid.horizontalHeader().setDefaultSectionSize(120)
+        self.grid.verticalHeader().setDefaultSectionSize(30)
+        self.grid.setMinimumHeight(150)
+        self.grid.setMaximumHeight(190)
+        for (r, c), label in _GAD_GRID_PREFILL.items():
+            item = QTableWidgetItem(label)
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.grid.setItem(r, c, item)
+        # friendly starting values (the sample from the reference drawing)
+        self.grid.setItem(0, 1, QTableWidgetItem("178.741"))   # RL value
+        self.grid.setItem(0, 4, QTableWidgetItem("4.25"))      # Linear Span
+        self.grid.setItem(1, 1, QTableWidgetItem("177.979"))   # FL
+        self.grid.setItem(2, 1, QTableWidgetItem("176.877"))   # HFL
+        self.grid.setItem(3, 1, QTableWidgetItem("175.877"))   # BL
+        vl.addWidget(self.grid)
+
+        self.extracted_lbl = QLabel("")
+        self.extracted_lbl.setObjectName("panelSubtitle")
+        self.extracted_lbl.setWordWrap(True)
+        vl.addWidget(self.extracted_lbl)
+
+        # ── generate button for the active view ─────────────────────────
+        gen_row = QHBoxLayout()
+        self.elev_btn = QPushButton("Generate Elevation")
+        self.elev_btn.setObjectName("primaryBtn")
+        self.elev_btn.setFixedHeight(44)
+        self.elev_btn.clicked.connect(self._generate_elevation)
+        gen_row.addWidget(self.elev_btn)
+        gen_row.addStretch()
+        vl.addLayout(gen_row)
+
+        layout.addWidget(card)
+
+    # ── view-button + input handling ───────────────────────────────────
+    def _on_view_clicked(self, key: str):
+        for k, (btn, active) in self._view_btns.items():
+            btn.setChecked(k == key and active)
+            if k == key and not active:
+                self.view_msg.setVisible(True)
+                self.view_msg.setText(
+                    "\u201c" + btn.text() + "\u201d generation arrives in a later "
+                    "phase — the inputs you enter here are shared, so they "
+                    "will be ready when its phase is implemented.")
+            elif k == key:
+                self.view_msg.setVisible(False)
+        self.elev_btn.setVisible(key == "elevation")
+
+    def _browse_input_file(self):
+        filt = ("Data files (*.xlsx *.xlsm *.xls *.csv *.pdf *.png *.jpg "
+                "*.jpeg *.tif *.tiff)")
+        path, _ = QFileDialog.getOpenFileName(self, "Choose input file", "", filt)
+        if not path:
+            return
+        self._show_log("info", f"Reading {os.path.basename(path)}…")
+        ext = path.rsplit(".", 1)[-1].lower()
+        try:
+            if ext in ("png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp"):
+                self._extract_file_values_ai(path)
+                return
+            inp, warns = elevation_from_file(path)
+            self._apply_extracted(inp, warns, source=os.path.basename(path))
+        except Exception as exc:  # noqa: BLE001
+            self._show_log("error", f"Could not read the file: {exc}")
+
+    def _extract_file_values_ai(self, path: str):
+        ck, gk = _load_keys()
+        if not (ck or gk):
+            self._show_log(
+                "error",
+                "Image/PDF-vision extraction needs an API key "
+                "(Settings \u2192 API Keys) — or enter values in the grid.")
+            return
+        from gui.ai_provider import AIProvider
+        ai = AIProvider.dual(gemini_key=gk, claude_key=ck)
+        self._ai_file_worker = _AIExtractWorker(path, ai, self)
+        self._ai_file_worker.done.connect(self._on_ai_extract_done)
+        self._ai_file_worker.failed.connect(lambda m: self._show_log("error", m))
+        self._ai_file_worker.start()
+
+    def _on_ai_extract_done(self, vals: dict, warns: list):
+        from core.gad_elevation import ElevationInput
+        inp = ElevationInput(
+            rail_level_m=vals.get("RL") or 0.0,
+            formation_level_m=vals.get("FL") or 0.0,
+            hfl_m=vals.get("HFL") or 0.0,
+            bed_level_m=vals.get("BL") or 0.0,
+            linear_span_m=vals.get("Linear Span") or 0.0,
+        )
+        self._apply_extracted(inp, warns, source="AI vision")
+
+    def _apply_extracted(self, inp, warns: list, source: str):
+        """Put extracted values into the grid so the user sees/edits them."""
+        self._last_extracted = inp
+        # values go to the right of their prefilled labels (see _GAD_GRID_PREFILL)
+        def put(r, c, v):
+            if v:
+                self.grid.setItem(r, c, QTableWidgetItem(f"{v:g}"))
+        put(0, 1, inp.rail_level_m)
+        put(0, 4, inp.linear_span_m)
+        put(1, 1, inp.formation_level_m)
+        put(2, 1, inp.hfl_m)
+        put(3, 1, inp.bed_level_m)
+        msg = f"Values from {source} filled into the grid."
+        if warns:
+            msg += "  " + " ".join(warns)
+        self.extracted_lbl.setText(msg)
+        self._show_log("success" if not warns else "info",
+                       f"Values extracted from {source}.")
+
+    def _grid_sheet(self):
+        vals = []
+        for r in range(GRID_ROWS):
+            row = []
+            for c in range(GRID_COLS):
+                it = self.grid.item(r, c)
+                row.append(it.text() if it else "")
+            vals.append(row)
+        return collect_grid(vals)
+
+    def _resolve_elevation_input(self):
+        """Sheet -> ElevationInput, falling back to the last extraction."""
+        sheet = self._grid_sheet()
+        inp = elevation_from_sheet(sheet)
+        if (inp.rail_level_m == 0 and inp.formation_level_m == 0
+                and inp.bed_level_m == 0 and inp.linear_span_m == 0
+                and getattr(self, "_last_extracted", None) is not None):
+            inp = self._last_extracted
+        return inp
+
+    # ── elevation generation ───────────────────────────────────────────
+    def _generate_elevation(self):
+        inp = self._resolve_elevation_input()
+        errs = inp.validate()
+        if errs:
+            self._show_log("error", "Fix the inputs: " + " ".join(errs))
+            return
+        out_dir = self.out_dir_edit.text().strip() or \
+            os.path.join(os.path.expanduser("~"), "BES_GAD_Output")
+        self.res_card.setVisible(False)
+        self.elev_btn.setEnabled(False)
+        self._show_log("info", "Drawing elevation (BL datum, mm at 1:1)…")
+        self._elev_worker = _ElevationWorker(inp, out_dir, self)
+        self._elev_worker.done.connect(self._on_elev_done)
+        self._elev_worker.failed.connect(self._on_failed)
+        self._elev_worker.start()
+
+    def _on_elev_done(self, res: dict):
+        self.elev_btn.setEnabled(True)
+        inp = res.get("input", {})
+        rows = [
+            ("View", "Elevation (phase 1)"),
+            ("RL / FL / BL / HFL", " / ".join(
+                f"{inp.get(k, 0):g} m" for k in
+                ("rail_level_m", "formation_level_m", "bed_level_m", "hfl_m"))),
+            ("Linear Span", f"{inp.get('linear_span_m', 0):g} m"),
+            ("BL line length", f"{5 * inp.get('linear_span_m', 0) * 1000:g} mm"),
+            ("DXF", res.get("dxf", "\u2014")),
+            ("AutoLISP", str(res.get("lsp", "\u2014")) + "  (command: BES-GAD-ELEV)"),
+            ("Entities", f"{res.get('total', 0)}"),
+        ]
+        while self.res_grid.count():
+            item = self.res_grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for r, (k, v) in enumerate(rows):
+            kl = QLabel(k); kl.setStyleSheet(
+                f"font-weight: 600; color: {COLORS['text_muted']};")
+            vl = QLabel(str(v)); vl.setWordWrap(True)
+            self.res_grid.addWidget(kl, r, 0)
+            self.res_grid.addWidget(vl, r, 1)
+        self.res_card.setVisible(True)
+        self.open_btn.setEnabled(True)
+
+        data = res.get("preview_png") or b""
+        if data:
+            pix = QPixmap()
+            if pix.loadFromData(data):
+                self._preview_pixmap = pix
+                self.preview_card.setVisible(True)
+                self._apply_zoom()
+        self._show_log("success", "Elevation drawn — open the DXF in AutoCAD "
+                                  "or load the LISP and run BES-GAD-ELEV.")
 
 
 # ═════════════════════════════════════════════════════════════════════════════

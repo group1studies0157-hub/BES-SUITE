@@ -587,7 +587,7 @@ class ScourPanel(QWidget):
         sec_lbl = QLabel("  INPUT DATA")
         sec_lbl.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         sec_lbl.setStyleSheet(
-            f"background:{COLORS['accent']}; color:#0D1117; "
+            f"background:{COLORS['accent']}; color:{COLORS['text_inverted']}; "
             f"padding:3px 8px; border-radius:4px;")
         gf_lay.addWidget(sec_lbl)
 
@@ -729,7 +729,7 @@ class ScourPanel(QWidget):
         res_hdr = QLabel("  RESULTS")
         res_hdr.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         res_hdr.setStyleSheet(
-            f"background:{COLORS['accent']}; color:#0D1117; "
+            f"background:{COLORS['accent']}; color:{COLORS['text_inverted']}; "
             f"padding:3px 8px; border-radius:4px;")
         rf_lay.addWidget(res_hdr)
 

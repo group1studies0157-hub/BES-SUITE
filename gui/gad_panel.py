@@ -52,6 +52,7 @@ ZONE DETECTION
 from __future__ import annotations
 
 import json, os, re, time, base64, threading, html
+import math
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -3559,9 +3560,6 @@ class ScrutinyPanel(QWidget):
         self._error_lbl.setVisible(False)
         cl.addWidget(self._error_lbl)
 
-        lay.addWidget(card)
-        lay.addSpacing(16)
-
         # ── Reference table card ────────────────────────────────────────────
         ref_card = QFrame()
         ref_card.setStyleSheet(
@@ -3612,7 +3610,140 @@ class ScrutinyPanel(QWidget):
             f"QTextEdit{{background:transparent;border:none;}}")
         ref_lay.addWidget(ref_view)
 
-        lay.addWidget(ref_card)
+        # ── Skew Calculator card (occupies the space adjacent to the
+        #    Vertical Clearance calculator) ──────────────────────────────────
+        skew_card = QFrame(); skew_card.setObjectName("card")
+        skew_card.setStyleSheet(
+            f"QFrame#card{{background:{COLORS['card_bg']};"
+            f"border:1px solid {COLORS['border']};border-radius:10px;}}")
+        sk = QVBoxLayout(skew_card)
+        sk.setContentsMargins(24,20,24,20); sk.setSpacing(14)
+
+        sk_title_row = QHBoxLayout()
+        sk_icon = QLabel("⤢"); sk_icon.setFont(QFont("Segoe UI", 18))
+        sk_title_row.addWidget(sk_icon)
+        sk_title_col = QVBoxLayout(); sk_title_col.setSpacing(0)
+        sk_t1 = QLabel("Skew Calculator")
+        sk_t1.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        sk_t1.setStyleSheet(f"color:{COLORS['text_primary']};")
+        sk_t2 = QLabel("Enter dimension & skew angle — "
+                        "skew length = dimension ÷ cos(skew angle)")
+        sk_t2.setFont(QFont("Segoe UI", 9)); sk_t2.setWordWrap(True)
+        sk_t2.setStyleSheet(f"color:{COLORS['text_muted']};")
+        sk_title_col.addWidget(sk_t1); sk_title_col.addWidget(sk_t2)
+        sk_title_row.addLayout(sk_title_col); sk_title_row.addStretch()
+        sk.addLayout(sk_title_row)
+
+        def _skew_line_edit(placeholder):
+            ed = QLineEdit()
+            ed.setPlaceholderText(placeholder)
+            ed.setFixedWidth(130)
+            ed.setFixedHeight(34)
+            ed.setFont(QFont("Segoe UI", 11))
+            ed.setStyleSheet(
+                f"QLineEdit{{background:{COLORS['input_bg']};"
+                f"border:1px solid {COLORS['border']};border-radius:6px;"
+                f"padding:0 10px;color:{COLORS['text_primary']};}}"
+                f"QLineEdit:focus{{border:1px solid {ACCENT};}}")
+            ed.returnPressed.connect(self._on_skew_calc)
+            return ed
+
+        sk_dim_row = QHBoxLayout(); sk_dim_row.setSpacing(10)
+        sk_dim_lbl = QLabel("Dimension:")
+        sk_dim_lbl.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        sk_dim_lbl.setStyleSheet(f"color:{COLORS['text_secondary']};")
+        sk_dim_row.addWidget(sk_dim_lbl)
+        self._skew_dim_input = _skew_line_edit("e.g. 6.0")
+        sk_dim_row.addWidget(self._skew_dim_input)
+        sk_dim_unit = QLabel("m")
+        sk_dim_unit.setFont(QFont("Segoe UI", 10))
+        sk_dim_unit.setStyleSheet(f"color:{COLORS['text_muted']};")
+        sk_dim_row.addWidget(sk_dim_unit)
+        sk_dim_row.addStretch()
+        sk.addLayout(sk_dim_row)
+
+        sk_ang_row = QHBoxLayout(); sk_ang_row.setSpacing(10)
+        sk_ang_lbl = QLabel("Skew Angle:")
+        sk_ang_lbl.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        sk_ang_lbl.setStyleSheet(f"color:{COLORS['text_secondary']};")
+        sk_ang_row.addWidget(sk_ang_lbl)
+        self._skew_angle_input = _skew_line_edit("e.g. 30")
+        sk_ang_row.addWidget(self._skew_angle_input)
+        sk_ang_unit = QLabel("°")
+        sk_ang_unit.setFont(QFont("Segoe UI", 10))
+        sk_ang_unit.setStyleSheet(f"color:{COLORS['text_muted']};")
+        sk_ang_row.addWidget(sk_ang_unit)
+        sk_ang_row.addStretch()
+        sk.addLayout(sk_ang_row)
+
+        sk_btn_row = QHBoxLayout(); sk_btn_row.setSpacing(10)
+        sk_calc_btn = QPushButton("Calculate Skew Length")
+        sk_calc_btn.setFixedHeight(34)
+        sk_calc_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        sk_calc_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        sk_calc_btn.setStyleSheet(
+            f"QPushButton{{background:{ACCENT};color:#06241C;"
+            f"border:none;border-radius:6px;padding:0 18px;}}"
+            f"QPushButton:hover{{background:{COLORS.get('accent_hover', ACCENT)};}}")
+        sk_calc_btn.clicked.connect(self._on_skew_calc)
+        sk_btn_row.addWidget(sk_calc_btn)
+        sk_btn_row.addStretch()
+        sk.addLayout(sk_btn_row)
+
+        # Result display
+        self._skew_result_frame = QFrame()
+        self._skew_result_frame.setVisible(False)
+        self._skew_result_frame.setStyleSheet(
+            f"QFrame{{background:{COLORS.get('accent_glow', COLORS['input_bg'])};"
+            f"border:1px solid {ACCENT};border-radius:8px;}}")
+        sk_rf = QVBoxLayout(self._skew_result_frame)
+        sk_rf.setContentsMargins(18,14,18,14); sk_rf.setSpacing(6)
+
+        sk_res_top = QHBoxLayout()
+        self._skew_value_lbl = QLabel("—")
+        self._skew_value_lbl.setFont(QFont("Segoe UI", 26, QFont.Weight.Bold))
+        self._skew_value_lbl.setStyleSheet(f"color:{ACCENT};")
+        sk_res_top.addWidget(self._skew_value_lbl)
+        sk_res_unit = QLabel("m")
+        sk_res_unit.setFont(QFont("Segoe UI", 13))
+        sk_res_unit.setStyleSheet(f"color:{COLORS['text_muted']};")
+        sk_res_unit.setAlignment(Qt.AlignmentFlag.AlignBottom)
+        sk_res_top.addWidget(sk_res_unit)
+        sk_res_top.addStretch()
+        sk_rf.addLayout(sk_res_top)
+
+        sk_res_lbl = QLabel("SKEW LENGTH")
+        sk_res_lbl.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        sk_res_lbl.setStyleSheet(
+            f"color:{COLORS['text_muted']};letter-spacing:1px;")
+        sk_rf.addWidget(sk_res_lbl)
+
+        self._skew_explain_lbl = QLabel("")
+        self._skew_explain_lbl.setFont(QFont("Consolas", 9))
+        self._skew_explain_lbl.setWordWrap(True)
+        self._skew_explain_lbl.setStyleSheet(f"color:{COLORS['text_secondary']};")
+        sk_rf.addWidget(self._skew_explain_lbl)
+
+        sk.addWidget(self._skew_result_frame)
+
+        self._skew_error_lbl = QLabel("")
+        self._skew_error_lbl.setStyleSheet("color:#F85149;font-size:11px;")
+        self._skew_error_lbl.setVisible(False)
+        sk.addWidget(self._skew_error_lbl)
+
+        # VC card + reference table stack on the left; Skew Calculator sits
+        # in the right column (previously vacant space).
+        top_row = QHBoxLayout(); top_row.setSpacing(16)
+        left_col = QVBoxLayout(); left_col.setSpacing(16)
+        left_col.addWidget(card)
+        left_col.addWidget(ref_card)
+        left_col.addStretch()
+        right_col = QVBoxLayout(); right_col.setSpacing(16)
+        right_col.addWidget(skew_card)
+        right_col.addStretch()
+        top_row.addLayout(left_col, 1)
+        top_row.addLayout(right_col, 1)
+        lay.addLayout(top_row)
         lay.addSpacing(16)
 
         # ── Gradient Checker card ───────────────────────────────────────────
@@ -4203,6 +4334,46 @@ class ScrutinyPanel(QWidget):
         self._vc_value_lbl.setText(f"{vc_mm:,}")
         self._explain_lbl.setText(explanation)
         self._result_frame.setVisible(True)
+
+    def _on_skew_calc(self):
+        """Skew length = input dimension / cos(skew angle)."""
+        self._skew_error_lbl.setVisible(False)
+        self._skew_result_frame.setVisible(False)
+
+        raw_dim = self._skew_dim_input.text().strip()
+        raw_ang = self._skew_angle_input.text().strip()
+        if not raw_dim or not raw_ang:
+            self._skew_error_lbl.setText("Enter both dimension and skew angle.")
+            self._skew_error_lbl.setVisible(True)
+            return
+        try:
+            dim = float(raw_dim)
+        except ValueError:
+            self._skew_error_lbl.setText("Enter a valid numeric dimension.")
+            self._skew_error_lbl.setVisible(True)
+            return
+        try:
+            angle = float(raw_ang)
+        except ValueError:
+            self._skew_error_lbl.setText("Enter a valid numeric skew angle (degrees).")
+            self._skew_error_lbl.setVisible(True)
+            return
+
+        if dim <= 0:
+            self._skew_error_lbl.setText("Dimension must be greater than zero.")
+            self._skew_error_lbl.setVisible(True)
+            return
+        if not (0 <= angle < 90):
+            self._skew_error_lbl.setText("Skew angle must be between 0° and 90° (exclusive).")
+            self._skew_error_lbl.setVisible(True)
+            return
+
+        c = math.cos(math.radians(angle))
+        skew_len = dim / c
+        self._skew_value_lbl.setText(f"{skew_len:.3f}")
+        self._skew_explain_lbl.setText(
+            f"{dim:.3f} ÷ cos({angle:g}°) = {dim:.3f} ÷ {c:.6f} = {skew_len:.3f} m")
+        self._skew_result_frame.setVisible(True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

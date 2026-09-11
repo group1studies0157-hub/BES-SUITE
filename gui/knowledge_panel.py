@@ -2332,7 +2332,8 @@ class KnowledgePanel(QWidget):
         self._find_input.setFixedHeight(28)
         self._find_input.setFixedWidth(170)
         self._find_input.setStyleSheet(
-            f"QLineEdit{{background:{COLORS['white']};border:1px solid {COLORS['border_dark']};"
+            f"QLineEdit{{background:{COLORS['input_bg']};color:{COLORS['text_primary']};"
+            f"border:1px solid {COLORS['border_dark']};"
             f"border-radius:6px;padding:2px 8px;font-size:11px;}}"
             f"QLineEdit:focus{{border-color:{COLORS['accent']};}}"
         )

@@ -1056,7 +1056,14 @@ def _add_grid_row(grid, row, sl, label, widget, unit=""):
 #  MODE SELECTOR WIDGET
 # ──────────────────────────────────────────────────────────────────────────────
 
-MODE_LABELS = ["New Line calculation", "Doubling/Tripling"]
+# Compact top-bar labels: the dropdown lives in a 66px-tall strip next to
+# global chrome, so short forms keep it readable without squeezing. The full
+# names remain on the combo tooltip and in each form's section header.
+MODE_LABELS = ["New Line", "Doubling"]
+MODE_TOOLTIPS = {
+    "New Line": "New Line calculation — RBF-16 catchment method",
+    "Doubling": "Doubling / Tripling / Quadrupling — OHFL-based method",
+}
 
 # Original drop-zone height was 90px; a 60% reduction leaves 40% of that.
 _EXTRACT_ZONE_H = 36
@@ -1118,8 +1125,15 @@ class ModeSelectorWidget(QWidget):
 
         self.combo = QComboBox()
         self.combo.addItems(MODE_LABELS)
-        self.combo.setFixedHeight(30)
-        self.combo.setFixedWidth(190)
+        for label, tip in MODE_TOOLTIPS.items():
+            self.combo.setItemData(MODE_LABELS.index(label), tip, Qt.ItemDataRole.ToolTipRole)
+        self.combo.setToolTip(MODE_TOOLTIPS[MODE_LABELS[0]])
+        self.combo.currentIndexChanged.connect(
+            lambda idx: self.combo.setToolTip(MODE_TOOLTIPS[MODE_LABELS[idx]])
+        )
+        # ~110px: fits the longest short label; height follows the global QSS
+        # (no fixed height) so the control is never vertically squeezed.
+        self.combo.setFixedWidth(110)
         self.combo.setStyleSheet("QComboBox{padding:3px 8px; font-size:12px;}")
         self.combo.setCursor(Qt.CursorShape.PointingHandCursor)
         self.combo.currentIndexChanged.connect(self._select)
@@ -1749,6 +1763,10 @@ class HydraulicPanel(QWidget):
         extra_lay.addWidget(self._mode_sel)
         extra_lay.addWidget(self._extract_btn)
         extra_lay.addWidget(self._toggle_btn)
+        # Trailing stretch: when the top bar hands this row more width than
+        # the controls need, the slack goes here instead of inflating the
+        # buttons — keeps the trio at natural size, left-aligned by the tagline.
+        extra_lay.addStretch(1)
 
         self._form_sep = QFrame()
         self._form_sep.setFrameShape(QFrame.Shape.HLine)
@@ -1763,9 +1781,19 @@ class HydraulicPanel(QWidget):
         self._form_doubling = DoublingForm()
         self._form_stack.addWidget(self._form_newline)
         self._form_stack.addWidget(self._form_doubling)
+
+        # Scroll wrapper: the New Line form alone needs ~700px of height; on a
+        # 900px window the preview bar, buttons and status leave less than that,
+        # so without this the Data Profile card was clipped at the bottom.
+        form_scroll = QScrollArea()
+        form_scroll.setWidgetResizable(True)
+        form_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        form_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        form_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        form_scroll.setWidget(self._form_stack)
         # Stretch factor 1: soaks up any leftover vertical space so the
         # buttons/status row settles near the bottom with no dead gap.
-        self._left_lay.addWidget(self._form_stack, 1)
+        self._left_lay.addWidget(form_scroll, 1)
         self._left_lay.addSpacing(12)
 
         self._btn_area = QWidget()
@@ -1774,7 +1802,7 @@ class HydraulicPanel(QWidget):
         btn_row.setContentsMargins(0, 0, 0, 0)
         btn_row.setSpacing(10)
 
-        self._calc_btn = styled_button("Calculate", "bolt", color="#FFFFFF")
+        self._calc_btn = styled_button("Calculate", "bolt", color=COLORS['text_inverted'])
         self._calc_btn.setObjectName("primaryBtn")
         self._calc_btn.setFixedHeight(40)
         self._calc_btn.clicked.connect(self._calculate)
@@ -1803,7 +1831,7 @@ class HydraulicPanel(QWidget):
 
         # Scour Depth Calc — same shape/size as Calculate, distinct color.
         # Only computes/opens the scour panel when the user clicks it.
-        self._scour_btn = styled_button("Scour Depth Calc", "water")
+        self._scour_btn = styled_button("Scour Depth Calc", "water", color=COLORS['text_inverted'])
         self._scour_btn.setFixedHeight(40)
         self._scour_btn.setCheckable(True)
         self._scour_btn.setEnabled(False)

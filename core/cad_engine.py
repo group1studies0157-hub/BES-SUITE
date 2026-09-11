@@ -115,6 +115,12 @@ COORDINATE RULES:
 - Hatching: bounding box + AutoCAD hatch pattern name only (no individual lines)
 """
 
+# BES drawing-standards knowledge pack (layers, text ladder, chain rules) —
+# sourced from .agents/skills/autocad_drawing_standards.md. CAD Process only;
+# bore log has its own drawing conventions and does not use this module.
+from core.cad_knowledge import build_vision_rules_block
+VISION_PROMPT += build_vision_rules_block()
+
 
 class CADEngine:
     def __init__(self, api_key=""):

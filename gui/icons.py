@@ -267,6 +267,7 @@ _ICON_FILES = {
     "codesearch": "codesearch.png",
     "book": "book.png",
     "folder": "folder.png",
+    "calcnotes": "quiz.png",   # Calculated Notes tile (reuses quiz glyph until a dedicated PNG is added)
     "info": "info.png",
 }
 

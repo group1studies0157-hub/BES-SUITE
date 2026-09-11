@@ -279,23 +279,46 @@ corrections applied, plus this extra top-level block:
   }
 """
 
+# BES drawing-standards knowledge pack (chain-close rule, RDSO quoting) —
+# sourced from .agents/skills/autocad_drawing_standards.md. CAD Process 2 only;
+# bore log does not import this module or gui.cad_panel2.
+from core.cad_knowledge import (
+    extract_rules_block as _bes_extract_rules,
+    repair_dimension_chain as _repair_chain,
+)
+VERIFY_SYSTEM_PROMPT += _bes_extract_rules()
+OBSERVE_SYSTEM_PROMPT = OBSERVE_SYSTEM_PROMPT + _bes_extract_rules()
+EXTRACT_HEAD = EXTRACT_HEAD + _bes_extract_rules()
+# EXTRACT_SYSTEM_PROMPT was assembled from EXTRACT_HEAD above (line ~215),
+# before the append — extend it directly so the single-shot path also
+# carries the BES drawing-standards rules.
+EXTRACT_SYSTEM_PROMPT = EXTRACT_SYSTEM_PROMPT + _bes_extract_rules()
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # VALIDATION HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _validate_chain(chain: list, expected_total, label: str, warnings: list):
-    """Check a dimension chain sums to expected total. Appends warnings."""
+def _validate_chain(chain: list, expected_total, label: str, warnings: list) -> list:
+    """Check a dimension chain sums to its stated total; on mismatch, AUTO-FIX
+    it to close (BES standards rule: sum(segments) == overall ±1 mm) via
+    proportional redistribution from core.cad_knowledge. The caller must write
+    the returned chain back into `data` so downstream geometry/Excel use the
+    repaired values. The fix is always logged — never applied silently."""
     if not chain or expected_total is None:
-        return
-    total = sum(v for v in chain if isinstance(v, (int, float)))
+        return chain
+    nums  = [float(v) for v in chain if isinstance(v, (int, float))]
+    total = sum(nums)
     diff  = abs(total - expected_total)
     tol   = max(5, expected_total * 0.005)   # 0.5% or 5mm tolerance
-    if diff > tol:
-        warnings.append(
-            f"{label}: chain sum {total:.0f}mm ≠ stated {expected_total:.0f}mm "
-            f"(diff {diff:.0f}mm)"
-        )
+    if diff <= tol or not nums:
+        return chain
+    fixed = _repair_chain(nums, float(expected_total))
+    warnings.append(
+        f"{label}: chain sum {total:.0f}mm ≠ stated {expected_total:.0f}mm "
+        f"(diff {diff:.0f}mm) — auto-fixed to close the chain"
+    )
+    return fixed
 
 
 def validate_extracted(data: dict) -> list:
@@ -309,7 +332,8 @@ def validate_extracted(data: dict) -> list:
     h = ev.get("horizontal_chain", [])
     span = ev.get("span_clear")
     if h and span:
-        _validate_chain(h, sum(v for v in h if v), "Elev H-chain", w)
+        ev["horizontal_chain"] = _validate_chain(
+            h, sum(v for v in h if v), "Elev H-chain", w)
 
     # Elevation vertical chain vs RL diff
     rl  = ev.get("rl", {})
@@ -319,7 +343,8 @@ def validate_extracted(data: dict) -> list:
         rl_diff = (rail - bed) * 1000   # m→mm
         vchain  = ev.get("vertical_dims", [])
         if vchain:
-            _validate_chain(vchain, rl_diff, "Elev V-chain vs RL diff", w)
+            ev["vertical_dims"] = _validate_chain(
+                vchain, rl_diff, "Elev V-chain vs RL diff", w)
 
     # Plan transverse chain
     pt = pv.get("transverse_chain", [])
@@ -328,10 +353,9 @@ def validate_extracted(data: dict) -> list:
 
     # Section slab thickness
     if sv.get("rcc_slab_thk") and sv.get("vertical_chain"):
-        vc_sum = sum(sv["vertical_chain"])
-        thk    = sv["rcc_slab_thk"]
-        if abs(vc_sum - thk) > 5:
-            w.append(f"Section V-chain sum {vc_sum}mm ≠ slab thickness {thk}mm")
+        thk = sv["rcc_slab_thk"]
+        sv["vertical_chain"] = _validate_chain(
+            sv["vertical_chain"], thk, "Section V-chain vs slab thickness", w)
 
     return w
 

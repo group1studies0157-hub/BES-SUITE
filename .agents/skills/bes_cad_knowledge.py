@@ -336,10 +336,77 @@ MATERIAL_ABBREVIATIONS = {
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# 5b. GAD GENERATOR — PHASED VIEW BUILDERS (started this session)
+# ═════════════════════════════════════════════════════════════════════════════
+
+# The GAD project is split into phase-wise view builders, one button each in
+# the GUI, sharing ONE input method (10x4 excel-like grid OR file upload).
+# Knowledge for each phase is accumulated here as sessions continue.
+
+GAD_VIEW_PHASES = {
+    "elevation":          {"status": "ACTIVE", "module": "core.gad_elevation"},
+    "plan":               {"status": "pending", "module": None},
+    "section":            {"status": "pending", "module": None},
+    "wing_return_wall":   {"status": "pending", "module": None},
+    "square_return":      {"status": "pending", "module": None},
+}
+
+# The five inputs — entered against prefilled descriptions in the grid
+# (RL:, FL:, HFL:, Linear Span:, BED LEVEL(BL):). Levels in METRES.
+GAD_INPUT_FIELDS = {
+    "RL":          "rail level, m",
+    "FL":          "formation level, m",
+    "HFL":         "high flood level, m (optional)",
+    "Linear Span": "span, m",
+    "BL":          "bed level, m — the DATUM",
+}
+
+GAD_ELEVATION_RULES = [
+    "BL is the datum: y = 0 at bed level.",
+    "Levels are entered in metres; ALL drawn heights/lengths/dimensions are "
+    "in millimetres (m x 1000). Never draw levels as metres.",
+    "BL horizontal line length = 5 x Linear Span (in mm).",
+    "FL line (labelled 'Pro. Formation Level') at (FL - BL) x 1000 above BL.",
+    "RL line at (RL - FL) x 1000 above the FL line.",
+    "All three horizontal lines share the same length (= BL line length).",
+    "One vertical CENTRAL LINE at mid-length intersecting all three lines.",
+    "Label every level line: value + description (e.g. 'B.L. 175.877').",
+    "HFL (optional) drawn on CENTRELINES layer so it reads as a dashed line.",
+    "LISP command name is per-view: BES-GAD-ELEV for elevation (write_lisp "
+    "takes command_name= now).",
+]
+
+# One skill file only — new phase knowledge gets appended here, not to new files.
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # 6. KNOWLEDGE GROWTH LOG
 # ═════════════════════════════════════════════════════════════════════════════
 
 SESSION_LOG = [
+    {
+        "date": "2026-09-11",
+        "topic": "GAD Generator — phased views, phase 1: Elevation",
+        "learnings": [
+            "GAD split into 5 phase buttons: Elevation (active), Plan, "
+            "Section, Wing & Return Wall, Square Return — same inputs each",
+            "Single input method: 10x4 excel-like grid with formulas "
+            "(core/cell_sheet.py) OR file upload (xlsx/pdf/image -> AI)",
+            "Only the computed VALUE against each description matters to the "
+            "drawing code; labels are just anchors (value right/below/same cell)",
+            "BL is datum; heights in mm = (level diff) x 1000; line length "
+            "= 5 x Linear Span; central line crosses all 3 level lines",
+            "cell_sheet gotcha: escape regex aliases ONCE (format() re-uses "
+            "raw strings); 'FL' regex must not match inside 'HFL' — use "
+            "lookbehind or longest-alias-first ordering",
+            "write_lisp is parametrized with command_name so each view gets "
+            "its own AutoCAD command (BES-GAD, BES-GAD-ELEV, ...)",
+            "The project venv (with packages) lives at %LOCALAPPDATA%/BES/venv "
+            "and has no pytest — tests ship a minimal approx/raises shim",
+        ],
+        "impact": "core/cell_sheet.py + core/gad_elevation.py + GUI buttons; "
+                  "34 tests pass",
+    },
     {
         "date": "2026-08-27",
         "topic": "DXF Repair Pipeline Overhaul",

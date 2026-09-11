@@ -261,7 +261,7 @@ class AIProvider:
 
     # ── Gemini key-explicit variants (used by dual mode) ──────────────────
     @staticmethod
-    def _gemini_client_for_key(api_key):
+    def _gemini_client_for_key(api_key, max_tokens: int = 4096):
         try:
             import google.generativeai as genai
         except ImportError:
@@ -273,13 +273,13 @@ class AIProvider:
         genai.configure(api_key=api_key)
         return genai.GenerativeModel(
             model_name=GEMINI_MODEL,
-            generation_config={"max_output_tokens": 4096,
+            generation_config={"max_output_tokens": max(int(max_tokens), 256),
                                "temperature": 0.3}
         )
 
     @staticmethod
     def _gemini_chat_key(api_key, system, user, max_tokens):
-        model = AIProvider._gemini_client_for_key(api_key)
+        model = AIProvider._gemini_client_for_key(api_key, max_tokens)
         resp  = model.generate_content(f"{system}\n\n{user}")
         return resp.text
 
@@ -292,7 +292,7 @@ class AIProvider:
                 "google-generativeai package is not installed.\n"
                 "Run:  pip install google-generativeai"
             )
-        model = AIProvider._gemini_client_for_key(api_key)
+        model = AIProvider._gemini_client_for_key(api_key, max_tokens)
         blob  = genai.protos.Blob(
             mime_type=mime,
             data=base64.b64decode(image_b64)

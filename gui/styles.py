@@ -19,7 +19,7 @@ DEFAULT_THEME = "graphite"
 
 # Bump when the default theme experience changes: installs whose saved
 # ui_theme_generation is older are migrated to DEFAULT_THEME exactly once.
-_THEME_GENERATION = 3
+_THEME_GENERATION = 4
 
 THEME_NAMES = {
     "graphite": "Graphite",
@@ -31,7 +31,7 @@ THEME_NAMES = {
 }
 
 THEME_SWATCHES = {
-    "graphite": ("#22D3EE", "#8B5CF6"),
+    "graphite": ("#0F172A", "#22D3EE"),
     "studio": ("#2563EB", "#0891B2"),
     "ocean": ("#0284C7", "#10B981"),
     "sunset": ("#EA580C", "#DC2626"),
@@ -48,61 +48,64 @@ FONT_MONO = "'Cascadia Mono', 'Consolas', 'SF Mono', Monaco, monospace"
 
 _THEMES = {
     "graphite": {
-        # Flagship — deep navy shell, light content stage, electric blue accent
-        "bg_primary": "#F4F7FB",
-        "bg_secondary": "#FFFFFF",
-        "bg_tertiary": "#EEF3F9",
-        "sidebar_bg": "#0B2A4E",
-        "text_primary": "#16283C",
-        "text_secondary": "#42566E",
-        "text_tertiary": "#7E8FA6",
-        "text_inverted": "#FFFFFF",
-        "border": "#D9E2EC",
-        "border_subtle": "#E4EAF2",
-        "input_bg": "#FFFFFF",
-        "input_border": "#C9D6E3",
-        "card_bg": "#FFFFFF",
-        "card_border": "#DCE5EE",
-        "hover_bg": "#EFF4FA",
-        "active_bg": "#E3ECF6",
-        "disabled_bg": "#EFF2F6",
-        "disabled_text": "#A6B4C4",
-        "accent": "#1668C7",
-        "accent_dim": "#0F4FA0",
-        "accent_light": "#2F80E0",
-        "accent_lighter": "#5B9BEB",
-        "accent_bg": "rgba(22,104,199,0.10)",
-        "accent_2": "#0B2A4E",
-        "accent_3": "#0EA5E9",
-        "success": "#16A34A",
-        "success_bg": "rgba(22,163,74,0.12)",
-        "warning": "#D97706",
-        "warning_bg": "rgba(217,119,6,0.12)",
-        "error": "#DC2626",
-        "error_bg": "rgba(220,38,38,0.10)",
-        "info": "#1668C7",
-        "info_bg": "rgba(22,104,199,0.10)",
+        # Flagship — deep charcoal-blue shell, glowing cyan→violet accents.
+        # True dark: every surface token is dark and every text token is light,
+        # so the whole UI re-inks proportionally when Graphite is active.
+        "bg_primary": "#0F172A",
+        "bg_secondary": "#1B2540",
+        "bg_tertiary": "#16203A",
+        "sidebar_bg": "#0B1120",
+        "text_primary": "#E8EEF9",
+        "text_secondary": "#B4C2D9",
+        "text_tertiary": "#7C8CA8",
+        "text_inverted": "#0B1120",   # dark ink on glowing accent fills
+        "border": "#2A3650",
+        "border_subtle": "#232E48",
+        "input_bg": "#141D33",
+        "input_border": "#33415E",
+        "card_bg": "#141D33",
+        "card_border": "#26334F",
+        "hover_bg": "#1C2942",
+        "active_bg": "#24314E",
+        "disabled_bg": "#161F35",
+        "disabled_text": "#5D6B85",
+        "accent": "#22D3EE",
+        "accent_dim": "#0E9BBE",
+        "accent_light": "#5EE1F5",
+        "accent_lighter": "#8FEAF9",
+        "accent_bg": "rgba(34,211,238,0.14)",
+        "accent_2": "#8B5CF6",
+        "accent_3": "#A78BFA",
+        "success": "#34D399",
+        "success_bg": "rgba(52,211,153,0.14)",
+        "warning": "#FBBF24",
+        "warning_bg": "rgba(251,191,36,0.14)",
+        "error": "#F87171",
+        "error_bg": "rgba(248,113,113,0.14)",
+        "info": "#38BDF8",
+        "info_bg": "rgba(56,189,248,0.14)",
         # Glass surfaces
-        "glass_bg": "rgba(255,255,255,0.85)",
-        "glass_border": "rgba(13,42,74,0.10)",
-        # Legacy
-        "navy": "#0B2A4E",
-        "navy_light": "#123A66",
-        "navy_border": "#1E4E80",
-        "sidebar_top": "#092342",
-        "sidebar_bottom": "#0F3560",
-        "accent_glow": "rgba(22,104,199,0.22)",
-        "accent_text": "#FFFFFF",
+        "glass_bg": "rgba(20,29,51,0.86)",
+        "glass_border": "rgba(148,180,220,0.14)",
+        # Legacy tokens — 'navy' must stay DARK: it is also used as ink on
+        # light chips (e.g. find-highlight text) in every theme.
+        "navy": "#0B1120",
+        "navy_light": "#16213A",
+        "navy_border": "#33415E",
+        "sidebar_top": "#0A1A33",
+        "sidebar_bottom": "#0E2A52",
+        "accent_glow": "rgba(34,211,238,0.20)",
+        "accent_text": "#0B1120",
         "white": "#FFFFFF",
-        "off_white": "#F4F7FB",
-        "panel_grad_1": "#FFFFFF",
-        "panel_grad_2": "#F4F7FB",
-        "text_muted": "#7E8FA6",
-        "text_sidebar": "#D6E4F5",
-        "border_dark": "#C9D6E3",
-        "progress_track": "#E4EAF2",
-        "settings_bg": "#FFFFFF",
-        "settings_row": "#F4F7FB",
+        "off_white": "#E8EEF9",
+        "panel_grad_1": "#141D33",
+        "panel_grad_2": "#0F172A",
+        "text_muted": "#7C8CA8",
+        "text_sidebar": "#C7D4EA",
+        "border_dark": "#3A4A6B",
+        "progress_track": "#232E48",
+        "settings_bg": "#0F172A",
+        "settings_row": "#141D33",
     },
     "studio": {
         # Light — clean, bright, premium
@@ -558,8 +561,8 @@ QPushButton#pinButton {{
     background-color: transparent;
     color: {C['text_tertiary']};
     border: none;
-    border-radius: 6px;
-    font-size: 10px;
+    border-radius: 5px;
+    font-size: 9px;
     font-weight: 600;
 }}
 
@@ -611,7 +614,7 @@ QLabel#versionLabel {{
 
 QFrame#sidebar {{
     background-color: {C['sidebar_bg']};
-    border-right: 1px solid #08203C;
+    border-right: 1px solid {C['border_subtle']};
 }}
 
 QFrame#sidebar QLabel {{
@@ -619,7 +622,7 @@ QFrame#sidebar QLabel {{
 }}
 
 QFrame#sidebar QLabel#navLabel {{
-    color: #6E8FB8;
+    color: {C['text_sidebar']};
     font-size: 9px;
     font-weight: 800;
     letter-spacing: 1px;
@@ -627,30 +630,35 @@ QFrame#sidebar QLabel#navLabel {{
 }}
 
 QFrame#sidebar QLabel#logoLabel {{
-    color: #FFFFFF;
+    color: {C['text_sidebar']};
     font-family: {FONT_DISPLAY};
-    font-size: 20px;
+    font-size: 17px;
     font-weight: 800;
+    letter-spacing: 0.5px;
 }}
 
 QFrame#sidebar QLabel#subLabel {{
-    color: #FFFFFF;
-    font-size: 10px;
+    color: {C['text_sidebar']};
+    font-size: 9px;
     font-weight: 600;
+    border-bottom: 2px solid {grad(C['accent'], C['accent_2'])};
+    padding-bottom: 2px;
 }}
 
 QFrame#sidebar QLabel#sideTagline {{
-    color: #8FB0D4;
-    font-size: 8px;
+    color: {C['text_sidebar']};
+    font-size: 7px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
 }}
 
 QFrame#sidebar QLabel#versionLabel {{
-    color: #8FB0D4;
+    color: {C['text_sidebar']};
     font-size: 9px;
 }}
 
 QFrame#sidebar QLabel#sideStatus {{
-    color: #4ADE80;
+    color: {C['success']};
     font-size: 10px;
     font-weight: 700;
 }}
@@ -658,7 +666,7 @@ QFrame#sidebar QLabel#sideStatus {{
 QFrame#sidebar QPushButton#sidebarButton,
 QFrame#sidebar QPushButton#settingsBtn {{
     background-color: transparent;
-    color: #C9DAEE;
+    color: {C['text_sidebar']};
     border: none;
     border-radius: 10px;
     padding: 9px 10px;
@@ -670,25 +678,27 @@ QFrame#sidebar QPushButton#settingsBtn {{
 
 QFrame#sidebar QPushButton#sidebarButton:hover,
 QFrame#sidebar QPushButton#settingsBtn:hover {{
-    background-color: rgba(255,255,255,0.10);
-    color: #FFFFFF;
+    background-color: {C['hover_bg']};
+    color: {C['text_primary']};
 }}
 
 QFrame#sidebar QPushButton#sidebarButton:checked,
 QFrame#sidebar QPushButton#settingsBtn:checked {{
     background-color: {C['accent']};
-    color: #FFFFFF;
+    color: {C['text_inverted']};
     font-weight: 700;
 }}
 
 QFrame#sidebar QPushButton#pinButton {{
-    color: #8FB0D4;
+    color: {C['text_sidebar']};
 }}
 
 #topBar {{
     background-color: {C['card_bg']};
     border-bottom: 1px solid {C['border_subtle']};
-    padding: 10px 16px;
+    /* spacing is owned by the layout's contentsMargins in _build_top_bar;
+       QSS padding would stack on top of it and squeeze panel controls */
+    padding: 0px;
 }}
 
 QLabel#topTitle {{
@@ -757,7 +767,7 @@ QPushButton:disabled {{
 
 QPushButton#primaryBtn {{
     background: {grad(C['accent'], C['accent_2'])};
-    color: #FFFFFF;
+    color: {C['text_inverted']};
     border: 1px solid {C['glass_border']};
     font-weight: 700;
 }}
@@ -1121,7 +1131,6 @@ QFrame#heroBanner {{
 }}
 
 QFrame#heroBanner QLabel {{
-    color: {C['text_inverted']};
     background: transparent;
 }}
 
@@ -1172,7 +1181,7 @@ QPushButton#chipButton:hover {{
 
 QPushButton#chipButton:checked {{
     background-color: {C['accent']};
-    color: #FFFFFF;
+    color: {C['text_inverted']};
     border: 1px solid {C['accent']};
     font-weight: 700;
 }}
@@ -1209,7 +1218,7 @@ QLabel#storeAppMeta {{
 
 QPushButton#openBtn {{
     background: {grad(C['accent'], C['accent_2'])};
-    color: #FFFFFF;
+    color: {C['text_inverted']};
     border: 1px solid {C['glass_border']};
     border-radius: 10px;
     font-size: 12px;
@@ -1280,7 +1289,7 @@ QFrame#profileChip {{
 
 QLabel#avatarLabel {{
     background: {grad(C['accent'], C['accent_2'])};
-    color: #FFFFFF;
+    color: {C['text_inverted']};
     border-radius: 14px;
     font-size: 11px;
     font-weight: 800;
@@ -1310,17 +1319,20 @@ QPushButton#profileChevron {{
 /* Hero — photo painted by HeroBanner; QSS only styles the overlays */
 QFrame#homeHero {{
     background-color: {C['navy']};
-    border: 1px solid #D5E2EF;
+    border: 1px solid {C['card_border']};
     border-radius: 16px;
 }}
 
 QFrame#homeHero QLabel {{
-    color: #FFFFFF;
+    /* no forced color: let heroKicker/heroTitle/heroSubtitle follow the theme;
+       heroFeature and heroQuoteTitle set their own (white on dark surfaces) */
     background: transparent;
 }}
 
 QLabel#heroKicker {{
-    color: #CFE4F7;
+    /* fixed ink: the hero paints a permanent white wash over the photo, so
+       its headline stays dark in every theme */
+    color: #0E2C50;
     font-size: 20px;
     font-weight: 800;
 }}
@@ -1333,7 +1345,7 @@ QLabel#heroTitle {{
 }}
 
 QLabel#heroSubtitle {{
-    color: #E3F0FC;
+    color: #42566E;
     font-size: 12px;
     font-weight: 500;
 }}
@@ -1479,7 +1491,7 @@ QPushButton#learnBtn:hover {{
 
 QPushButton#openBtn {{
     background-color: {C['accent']};
-    color: #FFFFFF;
+    color: {C['text_inverted']};
     border: none;
     border-radius: 10px;
     font-size: 12px;
@@ -1784,7 +1796,7 @@ QLabel#sidePromoTitle {{
 
 /* Tool-card icon tile + AI badge */
 QFrame#toolIconTile {{
-    background-color: #FFFFFF;
+    background-color: {C['card_bg']};
     border: 1px solid {C['border']};
     border-radius: 12px;
 }}
