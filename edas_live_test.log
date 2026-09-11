@@ -1,0 +1,518 @@
+=== LAUNCHING (retry) ===
+[ok] 🌐 Edge launched (isolated profile, minimized).
+[ok] 🧮 Captcha solved → -1
+[warn] ⚠ Login submitted but dashboard not detected.
+C:\Users\Manoj\AppData\Local\BES\venv\Lib\site-packages\google\auth\transport\grpc.py:44: FutureWarning: grpcio < 1.83.0 does not support Post-Quantum Cryptography (PQC). Support for non-PQC environments is deprecated. In October 2026, google-auth will raise its minimum requirements to enforce grpcio >= 1.83.0. For more details on Google Cloud's post-quantum security migration, visit: https://cloud.google.com/security/resources/post-quantum-cryptography
+  warnings.warn(
+G:\BES- MODIFIED UI\gui\ai_provider.py:289: FutureWarning: 
+
+All support for the `google.generativeai` package has ended. It will no longer be receiving 
+updates or bug fixes. Please switch to the `google.genai` package as soon as possible.
+See README for more details:
+
+https://github.com/google-gemini/deprecated-generative-ai-python/blob/main/README.md
+
+  import google.generativeai as genai
+[ok] 🧮 Captcha solved → 9
+[warn] ⚠ Login submitted but dashboard not detected.
+[ok] 🧮 Captcha solved → 9
+[warn] ⚠ Login submitted but dashboard not detected.
+[ok] 📊 Sheet opened.
+[info] 📋 Found bridge rows 5–66.
+[progress] row 5/66
+[warn] 🔁 eDAS session dropped — logging in again…
+[ok] 🧮 Captcha solved → 6
+[warn] ⚠ Login submitted but dashboard not detected.
+[err] ⚠ Could not open All Drawings: Message: no such element: Unable to locate element: {"method":"xpath","selector":"//*[contains(text(),'All Drawings')]"}
+  (Session info: MicrosoftEdge=151.0.4129.107); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#nosuchelementexception
+Stacktrace:
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e3d5+e025]
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e434+e084]
+	msedgedriver!GetHandleVerifier [0x7ff6bf223802+6c3452]
+	msedgedriver!(No symbol) [0x7ff6be55f762]
+	msedgedriver!(No symbol) [0x7ff6be55f9d5]
+	msedgedriver!(No symbol) [0x7ff6be59db67]
+	msedgedriver!(No symbol) [0x7ff6be556377]
+	msedgedriver!(No symbol) [0x7ff6be59b828]
+	msedgedriver!(No symbol) [0x7ff6be555bbc]
+	msedgedriver!(No symbol) [0x7ff6be554e16]
+	msedgedriver!(No symbol) [0x7ff6be5559e3]
+	msedgedriver!(No symbol) [0x7ff6be7c316b]
+	msedgedriver!(No symbol) [0x7ff6be7bf584]
+	msedgedriver!GetHandleVerifier [0x7ff6beb9b0e5+3ad35]
+	msedgedriver!GetHandleVerifier [0x7ff6beb89ea1+29af1]
+	msedgedriver!GetHandleVerifier [0x7ff6beb927e6+32436]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75d94+159e4]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75eb5+15b05]
+	msedgedriver!GetHandleVerifier [0x7ff6beb627f3+2443]
+	KERNEL32!BaseThreadInitThunk [0x7ffe7a90259d+1d]
+	ntdll!RtlUserThreadStart [0x7ffe7ab6af78+28]
+
+[warn] 🔁 eDAS session dropped — logging in again…
+[ok] 🧮 Captcha solved → 10
+[warn] ⚠ Login submitted but dashboard not detected.
+[err] ⚠ Could not open All Drawings: Message: no such element: Unable to locate element: {"method":"xpath","selector":"//*[contains(text(),'All Drawings')]"}
+  (Session info: MicrosoftEdge=151.0.4129.107); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#nosuchelementexception
+Stacktrace:
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e3d5+e025]
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e434+e084]
+	msedgedriver!GetHandleVerifier [0x7ff6bf223802+6c3452]
+	msedgedriver!(No symbol) [0x7ff6be55f762]
+	msedgedriver!(No symbol) [0x7ff6be55f9d5]
+	msedgedriver!(No symbol) [0x7ff6be59db67]
+	msedgedriver!(No symbol) [0x7ff6be556377]
+	msedgedriver!(No symbol) [0x7ff6be59b828]
+	msedgedriver!(No symbol) [0x7ff6be555bbc]
+	msedgedriver!(No symbol) [0x7ff6be554e16]
+	msedgedriver!(No symbol) [0x7ff6be5559e3]
+	msedgedriver!(No symbol) [0x7ff6be7c316b]
+	msedgedriver!(No symbol) [0x7ff6be7bf584]
+	msedgedriver!GetHandleVerifier [0x7ff6beb9b0e5+3ad35]
+	msedgedriver!GetHandleVerifier [0x7ff6beb89ea1+29af1]
+	msedgedriver!GetHandleVerifier [0x7ff6beb927e6+32436]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75d94+159e4]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75eb5+15b05]
+	msedgedriver!GetHandleVerifier [0x7ff6beb627f3+2443]
+	KERNEL32!BaseThreadInitThunk [0x7ffe7a90259d+1d]
+	ntdll!RtlUserThreadStart [0x7ffe7ab6af78+28]
+
+[warn] 🔁 eDAS session dropped — logging in again…
+[ok] 🧮 Captcha solved → 1
+[warn] ⚠ Login submitted but dashboard not detected.
+[err] ⚠ Could not open All Drawings: Message: no such element: Unable to locate element: {"method":"xpath","selector":"//*[contains(text(),'All Drawings')]"}
+  (Session info: MicrosoftEdge=151.0.4129.107); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#nosuchelementexception
+Stacktrace:
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e3d5+e025]
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e434+e084]
+	msedgedriver!GetHandleVerifier [0x7ff6bf223802+6c3452]
+	msedgedriver!(No symbol) [0x7ff6be55f762]
+	msedgedriver!(No symbol) [0x7ff6be55f9d5]
+	msedgedriver!(No symbol) [0x7ff6be59db67]
+	msedgedriver!(No symbol) [0x7ff6be556377]
+	msedgedriver!(No symbol) [0x7ff6be59b828]
+	msedgedriver!(No symbol) [0x7ff6be555bbc]
+	msedgedriver!(No symbol) [0x7ff6be554e16]
+	msedgedriver!(No symbol) [0x7ff6be5559e3]
+	msedgedriver!(No symbol) [0x7ff6be7c316b]
+	msedgedriver!(No symbol) [0x7ff6be7bf584]
+	msedgedriver!GetHandleVerifier [0x7ff6beb9b0e5+3ad35]
+	msedgedriver!GetHandleVerifier [0x7ff6beb89ea1+29af1]
+	msedgedriver!GetHandleVerifier [0x7ff6beb927e6+32436]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75d94+159e4]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75eb5+15b05]
+	msedgedriver!GetHandleVerifier [0x7ff6beb627f3+2443]
+	KERNEL32!BaseThreadInitThunk [0x7ffe7a90259d+1d]
+	ntdll!RtlUserThreadStart [0x7ffe7ab6af78+28]
+
+[warn] 🔁 eDAS session dropped — logging in again…
+[ok] 🧮 Captcha solved → -5
+[warn] ⚠ Login submitted but dashboard not detected.
+[warn] Br.No 468: no drawing found — clearing GAD-submitted tick.
+[progress] row 6/66
+[warn] 🔁 eDAS session dropped — logging in again…
+[ok] 🧮 Captcha solved → -5
+[warn] ⚠ Login submitted but dashboard not detected.
+[err] ⚠ Could not open All Drawings: Message: no such element: Unable to locate element: {"method":"xpath","selector":"//*[contains(text(),'All Drawings')]"}
+  (Session info: MicrosoftEdge=151.0.4129.107); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#nosuchelementexception
+Stacktrace:
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e3d5+e025]
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e434+e084]
+	msedgedriver!GetHandleVerifier [0x7ff6bf223802+6c3452]
+	msedgedriver!(No symbol) [0x7ff6be55f762]
+	msedgedriver!(No symbol) [0x7ff6be55f9d5]
+	msedgedriver!(No symbol) [0x7ff6be59db67]
+	msedgedriver!(No symbol) [0x7ff6be556377]
+	msedgedriver!(No symbol) [0x7ff6be59b828]
+	msedgedriver!(No symbol) [0x7ff6be555bbc]
+	msedgedriver!(No symbol) [0x7ff6be554e16]
+	msedgedriver!(No symbol) [0x7ff6be5559e3]
+	msedgedriver!(No symbol) [0x7ff6be7c316b]
+	msedgedriver!(No symbol) [0x7ff6be7bf584]
+	msedgedriver!GetHandleVerifier [0x7ff6beb9b0e5+3ad35]
+	msedgedriver!GetHandleVerifier [0x7ff6beb89ea1+29af1]
+	msedgedriver!GetHandleVerifier [0x7ff6beb927e6+32436]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75d94+159e4]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75eb5+15b05]
+	msedgedriver!GetHandleVerifier [0x7ff6beb627f3+2443]
+	KERNEL32!BaseThreadInitThunk [0x7ffe7a90259d+1d]
+	ntdll!RtlUserThreadStart [0x7ffe7ab6af78+28]
+
+[warn] 🔁 eDAS session dropped — logging in again…
+[ok] 🧮 Captcha solved → 7
+[warn] ⚠ Login submitted but dashboard not detected.
+[err] ⚠ Could not open All Drawings: Message: no such element: Unable to locate element: {"method":"xpath","selector":"//*[contains(text(),'All Drawings')]"}
+  (Session info: MicrosoftEdge=151.0.4129.107); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#nosuchelementexception
+Stacktrace:
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e3d5+e025]
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e434+e084]
+	msedgedriver!GetHandleVerifier [0x7ff6bf223802+6c3452]
+	msedgedriver!(No symbol) [0x7ff6be55f762]
+	msedgedriver!(No symbol) [0x7ff6be55f9d5]
+	msedgedriver!(No symbol) [0x7ff6be59db67]
+	msedgedriver!(No symbol) [0x7ff6be556377]
+	msedgedriver!(No symbol) [0x7ff6be59b828]
+	msedgedriver!(No symbol) [0x7ff6be555bbc]
+	msedgedriver!(No symbol) [0x7ff6be554e16]
+	msedgedriver!(No symbol) [0x7ff6be5559e3]
+	msedgedriver!(No symbol) [0x7ff6be7c316b]
+	msedgedriver!(No symbol) [0x7ff6be7bf584]
+	msedgedriver!GetHandleVerifier [0x7ff6beb9b0e5+3ad35]
+	msedgedriver!GetHandleVerifier [0x7ff6beb89ea1+29af1]
+	msedgedriver!GetHandleVerifier [0x7ff6beb927e6+32436]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75d94+159e4]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75eb5+15b05]
+	msedgedriver!GetHandleVerifier [0x7ff6beb627f3+2443]
+	KERNEL32!BaseThreadInitThunk [0x7ffe7a90259d+1d]
+	ntdll!RtlUserThreadStart [0x7ffe7ab6af78+28]
+
+[warn] 🔁 eDAS session dropped — logging in again…
+[ok] 🧮 Captcha solved → -1
+[warn] ⚠ Login submitted but dashboard not detected.
+[err] ⚠ Could not open All Drawings: Message: no such element: Unable to locate element: {"method":"xpath","selector":"//*[contains(text(),'All Drawings')]"}
+  (Session info: MicrosoftEdge=151.0.4129.107); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#nosuchelementexception
+Stacktrace:
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e3d5+e025]
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e434+e084]
+	msedgedriver!GetHandleVerifier [0x7ff6bf223802+6c3452]
+	msedgedriver!(No symbol) [0x7ff6be55f762]
+	msedgedriver!(No symbol) [0x7ff6be55f9d5]
+	msedgedriver!(No symbol) [0x7ff6be59db67]
+	msedgedriver!(No symbol) [0x7ff6be556377]
+	msedgedriver!(No symbol) [0x7ff6be59b828]
+	msedgedriver!(No symbol) [0x7ff6be555bbc]
+	msedgedriver!(No symbol) [0x7ff6be554e16]
+	msedgedriver!(No symbol) [0x7ff6be5559e3]
+	msedgedriver!(No symbol) [0x7ff6be7c316b]
+	msedgedriver!(No symbol) [0x7ff6be7bf584]
+	msedgedriver!GetHandleVerifier [0x7ff6beb9b0e5+3ad35]
+	msedgedriver!GetHandleVerifier [0x7ff6beb89ea1+29af1]
+	msedgedriver!GetHandleVerifier [0x7ff6beb927e6+32436]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75d94+159e4]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75eb5+15b05]
+	msedgedriver!GetHandleVerifier [0x7ff6beb627f3+2443]
+	KERNEL32!BaseThreadInitThunk [0x7ffe7a90259d+1d]
+	ntdll!RtlUserThreadStart [0x7ffe7ab6af78+28]
+
+[warn] 🔁 eDAS session dropped — logging in again…
+[ok] 🧮 Captcha solved → 50
+[warn] ⚠ Login submitted but dashboard not detected.
+[warn] Br.No 469: no drawing found — clearing GAD-submitted tick.
+[progress] row 7/66
+[warn] 🔁 eDAS session dropped — logging in again…
+[ok] 🧮 Captcha solved → 2
+[warn] ⚠ Login submitted but dashboard not detected.
+[err] ⚠ Could not open All Drawings: Message: no such element: Unable to locate element: {"method":"xpath","selector":"//*[contains(text(),'All Drawings')]"}
+  (Session info: MicrosoftEdge=151.0.4129.107); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#nosuchelementexception
+Stacktrace:
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e3d5+e025]
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e434+e084]
+	msedgedriver!GetHandleVerifier [0x7ff6bf223802+6c3452]
+	msedgedriver!(No symbol) [0x7ff6be55f762]
+	msedgedriver!(No symbol) [0x7ff6be55f9d5]
+	msedgedriver!(No symbol) [0x7ff6be59db67]
+	msedgedriver!(No symbol) [0x7ff6be556377]
+	msedgedriver!(No symbol) [0x7ff6be59b828]
+	msedgedriver!(No symbol) [0x7ff6be555bbc]
+	msedgedriver!(No symbol) [0x7ff6be554e16]
+	msedgedriver!(No symbol) [0x7ff6be5559e3]
+	msedgedriver!(No symbol) [0x7ff6be7c316b]
+	msedgedriver!(No symbol) [0x7ff6be7bf584]
+	msedgedriver!GetHandleVerifier [0x7ff6beb9b0e5+3ad35]
+	msedgedriver!GetHandleVerifier [0x7ff6beb89ea1+29af1]
+	msedgedriver!GetHandleVerifier [0x7ff6beb927e6+32436]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75d94+159e4]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75eb5+15b05]
+	msedgedriver!GetHandleVerifier [0x7ff6beb627f3+2443]
+	KERNEL32!BaseThreadInitThunk [0x7ffe7a90259d+1d]
+	ntdll!RtlUserThreadStart [0x7ffe7ab6af78+28]
+
+[warn] 🔁 eDAS session dropped — logging in again…
+[ok] 🧮 Captcha solved → 10
+[warn] ⚠ Login submitted but dashboard not detected.
+[err] ⚠ Could not open All Drawings: Message: no such element: Unable to locate element: {"method":"xpath","selector":"//*[contains(text(),'All Drawings')]"}
+  (Session info: MicrosoftEdge=151.0.4129.107); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#nosuchelementexception
+Stacktrace:
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e3d5+e025]
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e434+e084]
+	msedgedriver!GetHandleVerifier [0x7ff6bf223802+6c3452]
+	msedgedriver!(No symbol) [0x7ff6be55f762]
+	msedgedriver!(No symbol) [0x7ff6be55f9d5]
+	msedgedriver!(No symbol) [0x7ff6be59db67]
+	msedgedriver!(No symbol) [0x7ff6be556377]
+	msedgedriver!(No symbol) [0x7ff6be59b828]
+	msedgedriver!(No symbol) [0x7ff6be555bbc]
+	msedgedriver!(No symbol) [0x7ff6be554e16]
+	msedgedriver!(No symbol) [0x7ff6be5559e3]
+	msedgedriver!(No symbol) [0x7ff6be7c316b]
+	msedgedriver!(No symbol) [0x7ff6be7bf584]
+	msedgedriver!GetHandleVerifier [0x7ff6beb9b0e5+3ad35]
+	msedgedriver!GetHandleVerifier [0x7ff6beb89ea1+29af1]
+	msedgedriver!GetHandleVerifier [0x7ff6beb927e6+32436]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75d94+159e4]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75eb5+15b05]
+	msedgedriver!GetHandleVerifier [0x7ff6beb627f3+2443]
+	KERNEL32!BaseThreadInitThunk [0x7ffe7a90259d+1d]
+	ntdll!RtlUserThreadStart [0x7ffe7ab6af78+28]
+
+[warn] 🔁 eDAS session dropped — logging in again…
+[ok] 🧮 Captcha solved → -4
+[warn] ⚠ Login submitted but dashboard not detected.
+[err] ⚠ Could not open All Drawings: Message: no such element: Unable to locate element: {"method":"xpath","selector":"//*[contains(text(),'All Drawings')]"}
+  (Session info: MicrosoftEdge=151.0.4129.107); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#nosuchelementexception
+Stacktrace:
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e3d5+e025]
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e434+e084]
+	msedgedriver!GetHandleVerifier [0x7ff6bf223802+6c3452]
+	msedgedriver!(No symbol) [0x7ff6be55f762]
+	msedgedriver!(No symbol) [0x7ff6be55f9d5]
+	msedgedriver!(No symbol) [0x7ff6be59db67]
+	msedgedriver!(No symbol) [0x7ff6be556377]
+	msedgedriver!(No symbol) [0x7ff6be59b828]
+	msedgedriver!(No symbol) [0x7ff6be555bbc]
+	msedgedriver!(No symbol) [0x7ff6be554e16]
+	msedgedriver!(No symbol) [0x7ff6be5559e3]
+	msedgedriver!(No symbol) [0x7ff6be7c316b]
+	msedgedriver!(No symbol) [0x7ff6be7bf584]
+	msedgedriver!GetHandleVerifier [0x7ff6beb9b0e5+3ad35]
+	msedgedriver!GetHandleVerifier [0x7ff6beb89ea1+29af1]
+	msedgedriver!GetHandleVerifier [0x7ff6beb927e6+32436]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75d94+159e4]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75eb5+15b05]
+	msedgedriver!GetHandleVerifier [0x7ff6beb627f3+2443]
+	KERNEL32!BaseThreadInitThunk [0x7ffe7a90259d+1d]
+	ntdll!RtlUserThreadStart [0x7ffe7ab6af78+28]
+
+[warn] 🔁 eDAS session dropped — logging in again…
+[ok] 🧮 Captcha solved → 18
+[warn] ⚠ Login submitted but dashboard not detected.
+[warn] Br.No 470: no drawing found — clearing GAD-submitted tick.
+[progress] row 8/66
+[warn] 🔁 eDAS session dropped — logging in again…
+[ok] 🧮 Captcha solved → 3
+[warn] ⚠ Login submitted but dashboard not detected.
+[err] ⚠ Could not open All Drawings: Message: no such element: Unable to locate element: {"method":"xpath","selector":"//*[contains(text(),'All Drawings')]"}
+  (Session info: MicrosoftEdge=151.0.4129.107); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#nosuchelementexception
+Stacktrace:
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e3d5+e025]
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e434+e084]
+	msedgedriver!GetHandleVerifier [0x7ff6bf223802+6c3452]
+	msedgedriver!(No symbol) [0x7ff6be55f762]
+	msedgedriver!(No symbol) [0x7ff6be55f9d5]
+	msedgedriver!(No symbol) [0x7ff6be59db67]
+	msedgedriver!(No symbol) [0x7ff6be556377]
+	msedgedriver!(No symbol) [0x7ff6be59b828]
+	msedgedriver!(No symbol) [0x7ff6be555bbc]
+	msedgedriver!(No symbol) [0x7ff6be554e16]
+	msedgedriver!(No symbol) [0x7ff6be5559e3]
+	msedgedriver!(No symbol) [0x7ff6be7c316b]
+	msedgedriver!(No symbol) [0x7ff6be7bf584]
+	msedgedriver!GetHandleVerifier [0x7ff6beb9b0e5+3ad35]
+	msedgedriver!GetHandleVerifier [0x7ff6beb89ea1+29af1]
+	msedgedriver!GetHandleVerifier [0x7ff6beb927e6+32436]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75d94+159e4]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75eb5+15b05]
+	msedgedriver!GetHandleVerifier [0x7ff6beb627f3+2443]
+	KERNEL32!BaseThreadInitThunk [0x7ffe7a90259d+1d]
+	ntdll!RtlUserThreadStart [0x7ffe7ab6af78+28]
+
+[warn] 🔁 eDAS session dropped — logging in again…
+[ok] 🧮 Captcha solved → 20
+[warn] ⚠ Login submitted but dashboard not detected.
+[err] ⚠ Could not open All Drawings: Message: no such element: Unable to locate element: {"method":"xpath","selector":"//*[contains(text(),'All Drawings')]"}
+  (Session info: MicrosoftEdge=151.0.4129.107); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#nosuchelementexception
+Stacktrace:
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e3d5+e025]
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e434+e084]
+	msedgedriver!GetHandleVerifier [0x7ff6bf223802+6c3452]
+	msedgedriver!(No symbol) [0x7ff6be55f762]
+	msedgedriver!(No symbol) [0x7ff6be55f9d5]
+	msedgedriver!(No symbol) [0x7ff6be59db67]
+	msedgedriver!(No symbol) [0x7ff6be556377]
+	msedgedriver!(No symbol) [0x7ff6be59b828]
+	msedgedriver!(No symbol) [0x7ff6be555bbc]
+	msedgedriver!(No symbol) [0x7ff6be554e16]
+	msedgedriver!(No symbol) [0x7ff6be5559e3]
+	msedgedriver!(No symbol) [0x7ff6be7c316b]
+	msedgedriver!(No symbol) [0x7ff6be7bf584]
+	msedgedriver!GetHandleVerifier [0x7ff6beb9b0e5+3ad35]
+	msedgedriver!GetHandleVerifier [0x7ff6beb89ea1+29af1]
+	msedgedriver!GetHandleVerifier [0x7ff6beb927e6+32436]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75d94+159e4]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75eb5+15b05]
+	msedgedriver!GetHandleVerifier [0x7ff6beb627f3+2443]
+	KERNEL32!BaseThreadInitThunk [0x7ffe7a90259d+1d]
+	ntdll!RtlUserThreadStart [0x7ffe7ab6af78+28]
+
+[warn] 🔁 eDAS session dropped — logging in again…
+[ok] 🧮 Captcha solved → 5
+[ok] ✅ Logged in to eDAS.
+[warn] Br.No 471: no drawing found — clearing GAD-submitted tick.
+[progress] row 9/66
+[ok] Br.No 472: GM(W)-SCR-BRIDGES -TRACK-CON SC-DUU-6074-2026 → FU-WIP
+[progress] row 10/66
+[ok] Br.No 473: GM(W)-SCR-BRIDGES -TRACK-CON SC-DUU-408-2025 → HQ-WIP
+[progress] row 11/66
+[warn] Br.No 474: no drawing found — clearing GAD-submitted tick.
+[progress] row 12/66
+[warn] ⚠ Br.No 475: StaleElementReferenceException mid-row — attempting recovery…
+[ok] 🧮 Captcha solved → 3
+[warn] ⚠ Login submitted but dashboard not detected.
+[progress] row 13/66
+[warn] 🔁 eDAS session dropped — logging in again…
+[ok] 🧮 Captcha solved → 4
+[warn] ⚠ Login submitted but dashboard not detected.
+[err] ⚠ Could not open All Drawings: Message: no such element: Unable to locate element: {"method":"xpath","selector":"//*[contains(text(),'All Drawings')]"}
+  (Session info: MicrosoftEdge=151.0.4129.107); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#nosuchelementexception
+Stacktrace:
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e3d5+e025]
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e434+e084]
+	msedgedriver!GetHandleVerifier [0x7ff6bf223802+6c3452]
+	msedgedriver!(No symbol) [0x7ff6be55f762]
+	msedgedriver!(No symbol) [0x7ff6be55f9d5]
+	msedgedriver!(No symbol) [0x7ff6be59db67]
+	msedgedriver!(No symbol) [0x7ff6be556377]
+	msedgedriver!(No symbol) [0x7ff6be59b828]
+	msedgedriver!(No symbol) [0x7ff6be555bbc]
+	msedgedriver!(No symbol) [0x7ff6be554e16]
+	msedgedriver!(No symbol) [0x7ff6be5559e3]
+	msedgedriver!(No symbol) [0x7ff6be7c316b]
+	msedgedriver!(No symbol) [0x7ff6be7bf584]
+	msedgedriver!GetHandleVerifier [0x7ff6beb9b0e5+3ad35]
+	msedgedriver!GetHandleVerifier [0x7ff6beb89ea1+29af1]
+	msedgedriver!GetHandleVerifier [0x7ff6beb927e6+32436]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75d94+159e4]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75eb5+15b05]
+	msedgedriver!GetHandleVerifier [0x7ff6beb627f3+2443]
+	KERNEL32!BaseThreadInitThunk [0x7ffe7a90259d+1d]
+	ntdll!RtlUserThreadStart [0x7ffe7ab6af78+28]
+
+[warn] 🔁 eDAS session dropped — logging in again…
+[ok] 🧮 Captcha solved → 12
+[warn] ⚠ Login submitted but dashboard not detected.
+[err] ⚠ Could not open All Drawings: Message: no such element: Unable to locate element: {"method":"xpath","selector":"//*[contains(text(),'All Drawings')]"}
+  (Session info: MicrosoftEdge=151.0.4129.107); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#nosuchelementexception
+Stacktrace:
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e3d5+e025]
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e434+e084]
+	msedgedriver!GetHandleVerifier [0x7ff6bf223802+6c3452]
+	msedgedriver!(No symbol) [0x7ff6be55f762]
+	msedgedriver!(No symbol) [0x7ff6be55f9d5]
+	msedgedriver!(No symbol) [0x7ff6be59db67]
+	msedgedriver!(No symbol) [0x7ff6be556377]
+	msedgedriver!(No symbol) [0x7ff6be59b828]
+	msedgedriver!(No symbol) [0x7ff6be555bbc]
+	msedgedriver!(No symbol) [0x7ff6be554e16]
+	msedgedriver!(No symbol) [0x7ff6be5559e3]
+	msedgedriver!(No symbol) [0x7ff6be7c316b]
+	msedgedriver!(No symbol) [0x7ff6be7bf584]
+	msedgedriver!GetHandleVerifier [0x7ff6beb9b0e5+3ad35]
+	msedgedriver!GetHandleVerifier [0x7ff6beb89ea1+29af1]
+	msedgedriver!GetHandleVerifier [0x7ff6beb927e6+32436]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75d94+159e4]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75eb5+15b05]
+	msedgedriver!GetHandleVerifier [0x7ff6beb627f3+2443]
+	KERNEL32!BaseThreadInitThunk [0x7ffe7a90259d+1d]
+	ntdll!RtlUserThreadStart [0x7ffe7ab6af78+28]
+
+[warn] 🔁 eDAS session dropped — logging in again…
+[warn] ⚠ Captcha step failed: 'NoneType' object has no attribute 'clear'
+[err] ⚠ Could not click login button: Message: no such window: target window already closed
+from unknown error: web view not found
+  (Session info: MicrosoftEdge=151.0.4129.107)
+Stacktrace:
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e3d5+e025]
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e434+e084]
+	msedgedriver!GetHandleVerifier [0x7ff6bf223802+6c3452]
+	msedgedriver!(No symbol) [0x7ff6be4f81dd]
+	msedgedriver!(No symbol) [0x7ff6be584b3e]
+	msedgedriver!(No symbol) [0x7ff6be59b12f]
+	msedgedriver!(No symbol) [0x7ff6be555bbc]
+	msedgedriver!(No symbol) [0x7ff6be554e16]
+	msedgedriver!(No symbol) [0x7ff6be5559e3]
+	msedgedriver!(No symbol) [0x7ff6be7c316b]
+	msedgedriver!(No symbol) [0x7ff6be7bf584]
+	msedgedriver!GetHandleVerifier [0x7ff6beb9b0e5+3ad35]
+	msedgedriver!GetHandleVerifier [0x7ff6beb89ea1+29af1]
+	msedgedriver!GetHandleVerifier [0x7ff6beb927e6+32436]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75d94+159e4]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75eb5+15b05]
+	msedgedriver!GetHandleVerifier [0x7ff6beb627f3+2443]
+	KERNEL32!BaseThreadInitThunk [0x7ffe7a90259d+1d]
+	ntdll!RtlUserThreadStart [0x7ffe7ab6af78+28]
+
+[warn] ⚠ Br.No 476: NoSuchWindowException mid-row — attempting recovery…
+[ok] 🧮 Captcha solved → 3
+[ok] ✅ Logged in to eDAS.
+[progress] row 14/66
+[err] Fatal error: Message: no such element: Unable to locate element: {"method":"css selector","selector":"[id="t-name-box"]"}
+  (Session info: MicrosoftEdge=151.0.4129.107); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#nosuchelementexception
+Stacktrace:
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e3d5+e025]
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e434+e084]
+	msedgedriver!GetHandleVerifier [0x7ff6bf223802+6c3452]
+	msedgedriver!(No symbol) [0x7ff6be55f762]
+	msedgedriver!(No symbol) [0x7ff6be55f9d5]
+	msedgedriver!(No symbol) [0x7ff6be59db67]
+	msedgedriver!(No symbol) [0x7ff6be556377]
+	msedgedriver!(No symbol) [0x7ff6be59b828]
+	msedgedriver!(No symbol) [0x7ff6be555bbc]
+	msedgedriver!(No symbol) [0x7ff6be554e16]
+	msedgedriver!(No symbol) [0x7ff6be5559e3]
+	msedgedriver!(No symbol) [0x7ff6be7c316b]
+	msedgedriver!(No symbol) [0x7ff6be7bf584]
+	msedgedriver!GetHandleVerifier [0x7ff6beb9b0e5+3ad35]
+	msedgedriver!GetHandleVerifier [0x7ff6beb89ea1+29af1]
+	msedgedriver!GetHandleVerifier [0x7ff6beb927e6+32436]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75d94+159e4]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75eb5+15b05]
+	msedgedriver!GetHandleVerifier [0x7ff6beb627f3+2443]
+	KERNEL32!BaseThreadInitThunk [0x7ffe7a90259d+1d]
+	ntdll!RtlUserThreadStart [0x7ffe7ab6af78+28]
+
+Traceback (most recent call last):
+  File "G:\BES- MODIFIED UI\gui\gad_panel.py", line 2917, in run
+    self._run_inner()
+    ~~~~~~~~~~~~~~~^^
+  File "G:\BES- MODIFIED UI\gui\gad_panel.py", line 3325, in _run_inner
+    brno = self._sheet_read(f"{SU_COL_BRNO}{row_n}")
+  File "G:\BES- MODIFIED UI\gui\gad_panel.py", line 3154, in _sheet_read
+    self._sheet_goto(cell_ref)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "G:\BES- MODIFIED UI\gui\gad_panel.py", line 3145, in _sheet_goto
+    name_box = self.driver.find_element(By.ID, "t-name-box")
+  File "C:\Users\Manoj\AppData\Local\BES\venv\Lib\site-packages\selenium\webdriver\remote\webdriver.py", line 911, in find_element
+    return self.execute(Command.FIND_ELEMENT, {"using": by, "value": value})["value"]
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Manoj\AppData\Local\BES\venv\Lib\site-packages\selenium\webdriver\remote\webdriver.py", line 504, in execute
+    self.error_handler.check_response(response)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\Manoj\AppData\Local\BES\venv\Lib\site-packages\selenium\webdriver\remote\errorhandler.py", line 232, in check_response
+    raise exception_class(message, screen, stacktrace)
+selenium.common.exceptions.NoSuchElementException: Message: no such element: Unable to locate element: {"method":"css selector","selector":"[id="t-name-box"]"}
+  (Session info: MicrosoftEdge=151.0.4129.107); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#nosuchelementexception
+Stacktrace:
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e3d5+e025]
+	msedgedriver!GetHandleVerifier [0x7ff6beb6e434+e084]
+	msedgedriver!GetHandleVerifier [0x7ff6bf223802+6c3452]
+	msedgedriver!(No symbol) [0x7ff6be55f762]
+	msedgedriver!(No symbol) [0x7ff6be55f9d5]
+	msedgedriver!(No symbol) [0x7ff6be59db67]
+	msedgedriver!(No symbol) [0x7ff6be556377]
+	msedgedriver!(No symbol) [0x7ff6be59b828]
+	msedgedriver!(No symbol) [0x7ff6be555bbc]
+	msedgedriver!(No symbol) [0x7ff6be554e16]
+	msedgedriver!(No symbol) [0x7ff6be5559e3]
+	msedgedriver!(No symbol) [0x7ff6be7c316b]
+	msedgedriver!(No symbol) [0x7ff6be7bf584]
+	msedgedriver!GetHandleVerifier [0x7ff6beb9b0e5+3ad35]
+	msedgedriver!GetHandleVerifier [0x7ff6beb89ea1+29af1]
+	msedgedriver!GetHandleVerifier [0x7ff6beb927e6+32436]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75d94+159e4]
+	msedgedriver!GetHandleVerifier [0x7ff6beb75eb5+15b05]
+	msedgedriver!GetHandleVerifier [0x7ff6beb627f3+2443]
+	KERNEL32!BaseThreadInitThunk [0x7ffe7a90259d+1d]
+	ntdll!RtlUserThreadStart [0x7ffe7ab6af78+28]
+
+
+
+=== WORKER STOPPED: error ===
